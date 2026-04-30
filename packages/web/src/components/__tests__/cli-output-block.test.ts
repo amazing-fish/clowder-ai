@@ -78,7 +78,7 @@ describe('CliOutputBlock', () => {
     expect(container.textContent).toContain('Read index.ts');
   });
 
-  it('streaming status → always expanded, summary says streaming', () => {
+  it('streaming status → initially expanded, summary says streaming', () => {
     act(() => {
       root.render(
         React.createElement(CliOutputBlock, {
@@ -90,6 +90,75 @@ describe('CliOutputBlock', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('streaming');
     expect(text).toContain('Bash pnpm test');
+  });
+
+  it('user can manually collapse output during streaming', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // Initially expanded during streaming
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+
+    // User manually collapses
+    const btn = container.querySelector('button');
+    act(() => {
+      btn?.click();
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Re-render (simulates new streaming event) — should stay collapsed
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [
+            { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' },
+            { id: 't2', kind: 'tool_use', timestamp: 1001, label: 'Bash pnpm lint' },
+          ],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+  });
+
+  it('user can manually collapse tools section during streaming', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // Tools section initially expanded during streaming
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    expect(toolsToggle).toBeTruthy();
+    expect(container.textContent).not.toContain('(collapsed)');
+
+    // User collapses tools
+    act(() => {
+      toolsToggle?.click();
+    });
+    expect(container.textContent).toContain('(collapsed)');
+
+    // Re-render with new streaming event — tools should stay collapsed
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [
+            { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' },
+            { id: 't2', kind: 'tool_use', timestamp: 1001, label: 'Bash pnpm lint' },
+          ],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.textContent).toContain('(collapsed)');
   });
 
   it('shows shared visibility chip when thinkingMode=debug', () => {

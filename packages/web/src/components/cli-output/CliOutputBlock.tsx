@@ -269,7 +269,7 @@ function ToolsSection({
     prevStatus.current = status;
   }, [status, isStreaming]);
 
-  if (isStreaming && !toolsExpanded) {
+  if (isStreaming && !toolsExpanded && !toolsUserInteracted.current) {
     setToolsExpanded(true);
   }
 
@@ -335,7 +335,7 @@ export function CliOutputBlock({
   const userInteracted = useRef(false);
   const hasMounted = useRef(false);
 
-  if (forceExpanded && !expanded) {
+  if (forceExpanded && !expanded && !userInteracted.current) {
     setExpanded(true);
   }
 
