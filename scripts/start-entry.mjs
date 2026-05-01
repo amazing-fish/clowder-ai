@@ -12,7 +12,8 @@
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
  */
 import { spawn } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,10 +21,64 @@ const projectRoot = resolve(__dirname, '..');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-// First positional arg is the mode (start | start:direct | dev:direct)
+// First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
 
-if (IS_WINDOWS) {
+function pidIsRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'EPERM') return true;
+    return false;
+  }
+}
+
+function runWindowsStatus() {
+  const runDir = resolve(projectRoot, '.cat-cafe', 'run', 'windows');
+  if (!existsSync(runDir)) {
+    console.log(`Cat Cafe Windows services not running (no run directory: ${runDir})`);
+    process.exit(1);
+  }
+
+  const pidFiles = readdirSync(runDir)
+    .filter((name) => name.endsWith('.pid'))
+    .sort();
+
+  if (pidFiles.length === 0) {
+    console.log(`Cat Cafe Windows services not running (no PID files in ${runDir})`);
+    process.exit(1);
+  }
+
+  let runningCount = 0;
+  console.log('Cat Cafe Windows status');
+  for (const pidFile of pidFiles) {
+    const pidPath = resolve(runDir, pidFile);
+    const pid = Number.parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
+    const label = basename(pidFile, '.pid');
+    if (Number.isNaN(pid)) {
+      console.log(`  ${label}: invalid PID file`);
+      continue;
+    }
+    const running = pidIsRunning(pid);
+    if (running) runningCount += 1;
+    console.log(`  ${label}: ${running ? 'running' : 'not running'} (PID: ${pid})`);
+  }
+
+  process.exit(runningCount > 0 ? 0 : 1);
+}
+
+if (mode === 'status') {
+  if (IS_WINDOWS) {
+    runWindowsStatus();
+  } else {
+    const child = spawn('bash', [resolve(__dirname, 'start-dev.sh'), '--status'], {
+      cwd: projectRoot,
+      stdio: 'inherit',
+    });
+    child.on('exit', (code) => process.exit(code ?? 1));
+  }
+} else if (IS_WINDOWS) {
   // Map Unix-style flags to PowerShell switch params
   const flagMap = { '--debug': '-Debug', '--quick': '-Quick', '--memory': '-Memory', '--dev': '-Dev' };
   const psArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve(__dirname, 'start-windows.ps1')];
