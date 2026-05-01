@@ -398,7 +398,7 @@ export class DingTalkAdapter implements IStreamableOutboundAdapter {
    * Delete/finish an AI Card (transition to FINISHED state).
    * StreamingOutboundHook calls this for cleanup.
    */
-  async deleteMessage(platformMessageId: string): Promise<void> {
+  async deleteMessage(_externalChatId: string, platformMessageId: string): Promise<void> {
     const card = this.activeCards.get(platformMessageId);
     if (!card) return;
 

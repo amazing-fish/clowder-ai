@@ -144,7 +144,7 @@ export class XiaoyiAdapter implements IStreamableOutboundAdapter {
     // No-op: XiaoYi delivers final text only via sendReply
   }
 
-  async deleteMessage(): Promise<void> {
+  async deleteMessage(_externalChatId: string, _platformMessageId: string): Promise<void> {
     // No-op: no streaming artifacts to finalize
   }
 

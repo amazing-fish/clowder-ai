@@ -698,7 +698,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
    * Delete a message by its platform message ID.
    * Used to clean up streaming placeholder cards after final outbound delivery.
    */
-  async deleteMessage(platformMessageId: string): Promise<void> {
+  async deleteMessage(_externalChatId: string, platformMessageId: string): Promise<void> {
     if (this.deleteMessageFn) {
       await this.deleteMessageFn({ messageId: platformMessageId });
       return;

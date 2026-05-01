@@ -467,7 +467,7 @@ export class WeComBotAdapter implements IStreamableOutboundAdapter {
    * Finish/delete a streaming session (send finish=true).
    * StreamingOutboundHook calls this for cleanup.
    */
-  async deleteMessage(platformMessageId: string): Promise<void> {
+  async deleteMessage(_externalChatId: string, platformMessageId: string): Promise<void> {
     const session = this.activeStreams.get(platformMessageId);
     if (!session) return;
 
