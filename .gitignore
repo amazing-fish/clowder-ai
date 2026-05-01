@@ -88,6 +88,7 @@ data/
 test-audit-logs/
 
 # Temporary files
+.tmp/
 tmp/
 temp/
 

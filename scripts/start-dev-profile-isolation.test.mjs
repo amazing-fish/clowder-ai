@@ -232,6 +232,31 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
     assert.match(pkg.scripts.start, /start-entry\.mjs start\b/, 'pnpm start must route through start-entry.mjs');
   });
+  it('package.json scripts.start:status routes through start-entry.mjs for Windows pnpm shells', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+
+    assert.match(
+      pkg.scripts['start:status'],
+      /start-entry\.mjs status\b/,
+      'pnpm start:status must not invoke ./scripts/start-dev.sh directly',
+    );
+  });
+
+  it('start-entry.mjs handles Windows status without shelling through bash', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
+
+    assert.ok(source.includes('runWindowsStatus()'), 'Windows status path must use the native status helper');
+    assert.ok(source.includes("mode === 'status'"), 'start-entry.mjs must accept status mode');
+    assert.match(
+      source,
+      /if \(IS_WINDOWS\) \{\s+runWindowsStatus\(\);\s+\} else \{/,
+      'Windows status path must not rely on runWindowsStatus() exiting before the bash fallback',
+    );
+    assert.ok(
+      source.includes("'start-dev.sh'), '--status'"),
+      'non-Windows status path must preserve start-dev.sh status',
+    );
+  });
 
   it('start-entry.mjs sets CAT_CAFE_PROFILE and CAT_CAFE_STRICT_PROFILE_DEFAULTS for Windows when --profile is present', () => {
     const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
