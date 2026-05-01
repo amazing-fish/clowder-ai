@@ -744,7 +744,7 @@ describe('WeComBotAdapter', () => {
       adapter._injectGenerateReqId(() => 'stream_delete');
 
       const pmId = await adapter.sendPlaceholder('user_001', 'Thinking...');
-      await adapter.deleteMessage(pmId);
+      await adapter.deleteMessage('user_001', pmId);
 
       assert.ok(streamCalls.length >= 2);
       const lastCall = streamCalls[streamCalls.length - 1];
@@ -759,7 +759,7 @@ describe('WeComBotAdapter', () => {
         streamCalls.push({ finish });
       });
 
-      await adapter.deleteMessage('nonexistent');
+      await adapter.deleteMessage('user_001', 'nonexistent');
       assert.equal(streamCalls.length, 0);
     });
 
@@ -785,7 +785,7 @@ describe('WeComBotAdapter', () => {
       adapter._injectGenerateReqId(() => 'stream_del_fail');
 
       const pmId = await adapter.sendPlaceholder('user_001', 'Thinking...');
-      await adapter.deleteMessage(pmId);
+      await adapter.deleteMessage('user_001', pmId);
       assert.equal(adapter._getActiveStreams().size, 0);
     });
   });
@@ -1159,7 +1159,7 @@ describe('WeComBotAdapter', () => {
       const pmId = await adapter.sendPlaceholder('user_001', 'test');
       assert.equal(adapter._getActiveStreams().size, 1);
 
-      await adapter.deleteMessage(pmId);
+      await adapter.deleteMessage('user_001', pmId);
       assert.equal(adapter._getActiveStreams().size, 0);
     });
 

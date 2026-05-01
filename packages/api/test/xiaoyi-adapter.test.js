@@ -326,7 +326,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
     await adapter.editMessage('agent-1:sess-1', 'any-id', 'partial text');
     assert.equal(sent.length, 0, 'editMessage is no-op');
 
-    await adapter.deleteMessage('any-id');
+    await adapter.deleteMessage('agent-1:sess-1', 'any-id');
     assert.equal(sent.length, 0, 'deleteMessage is no-op');
 
     await adapter.stopStream();

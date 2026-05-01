@@ -918,7 +918,7 @@ describe('FeishuAdapter', () => {
         deleteCalls.push(params);
       });
 
-      await adapter.deleteMessage('om_msg_to_delete');
+      await adapter.deleteMessage('chat_001', 'om_msg_to_delete');
       assert.equal(deleteCalls.length, 1);
       assert.equal(deleteCalls[0].messageId, 'om_msg_to_delete');
     });

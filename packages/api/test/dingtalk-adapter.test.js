@@ -482,7 +482,7 @@ describe('DingTalkAdapter', () => {
       });
 
       const outTrackId = await adapter.sendPlaceholder('staff_001', 'Thinking...');
-      await adapter.deleteMessage(outTrackId);
+      await adapter.deleteMessage('staff_001', outTrackId);
 
       assert.ok(streamCalls.length >= 1);
       const lastCall = streamCalls[streamCalls.length - 1];
@@ -496,7 +496,7 @@ describe('DingTalkAdapter', () => {
         streamCalls.push(params);
       });
 
-      await adapter.deleteMessage('nonexistent');
+      await adapter.deleteMessage('staff_001', 'nonexistent');
       assert.equal(streamCalls.length, 0);
     });
 
