@@ -161,6 +161,82 @@ describe('CliOutputBlock', () => {
     expect(container.textContent).toContain('(collapsed)');
   });
 
+  it('resets output collapse when status restarts to streaming after done', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // User collapses during streaming
+    const btn = container.querySelector('button');
+    act(() => {
+      btn?.click();
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Streaming ends → done
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'done',
+        }),
+      );
+    });
+
+    // New streaming session starts → should re-expand (reset userInteracted)
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't2', kind: 'tool_use', timestamp: 2000, label: 'Bash pnpm build' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
+  it('resets tools collapse when status restarts to streaming after done', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // User collapses tools during streaming
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    act(() => {
+      toolsToggle?.click();
+    });
+    expect(container.textContent).toContain('(collapsed)');
+
+    // Streaming ends → done
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'done',
+        }),
+      );
+    });
+
+    // New streaming session → tools should re-expand
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't2', kind: 'tool_use', timestamp: 2000, label: 'Bash pnpm build' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.textContent).not.toContain('(collapsed)');
+  });
+
   it('shows shared visibility chip when thinkingMode=debug', () => {
     act(() => {
       root.render(
