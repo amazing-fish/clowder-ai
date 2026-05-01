@@ -12,7 +12,7 @@
  *   pnpm dev:direct          → start-entry.mjs dev:direct [--debug] [--quick] [--memory]
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +34,30 @@ function pidIsRunning(pid) {
   }
 }
 
+function readDotEnvValues(dotEnvPath) {
+  if (!existsSync(dotEnvPath)) return {};
+
+  const values = {};
+  for (const rawLine of readFileSync(dotEnvPath, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) continue;
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line
+      .slice(separatorIndex + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
+    values[key] = value;
+  }
+  return values;
+}
+
+function getConfigValue(dotEnv, key) {
+  return dotEnv[key] || process.env[key];
+}
+
 function runWindowsStatus() {
   const runDir = resolve(projectRoot, '.cat-cafe', 'run', 'windows');
   if (!existsSync(runDir)) {
@@ -41,31 +65,33 @@ function runWindowsStatus() {
     process.exit(1);
   }
 
-  const pidFiles = readdirSync(runDir)
-    .filter((name) => name.endsWith('.pid'))
-    .sort();
+  const dotEnv = readDotEnvValues(resolve(projectRoot, '.env'));
+  const apiPort = getConfigValue(dotEnv, 'API_SERVER_PORT') ?? '3004';
+  const webPort = getConfigValue(dotEnv, 'FRONTEND_PORT') ?? '3003';
+  const requiredServices = [
+    { label: 'api', pidFile: `api-${apiPort}.pid`, running: false },
+    { label: 'web', pidFile: `web-${webPort}.pid`, running: false },
+  ];
 
-  if (pidFiles.length === 0) {
-    console.log(`Cat Cafe Windows services not running (no PID files in ${runDir})`);
-    process.exit(1);
-  }
-
-  let runningCount = 0;
   console.log('Cat Cafe Windows status');
-  for (const pidFile of pidFiles) {
-    const pidPath = resolve(runDir, pidFile);
+  for (const service of requiredServices) {
+    const pidPath = resolve(runDir, service.pidFile);
+    const label = basename(service.pidFile, '.pid');
+    if (!existsSync(pidPath)) {
+      console.log(`  ${label}: not running (missing PID file)`);
+      continue;
+    }
+
     const pid = Number.parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
-    const label = basename(pidFile, '.pid');
     if (Number.isNaN(pid)) {
       console.log(`  ${label}: invalid PID file`);
       continue;
     }
-    const running = pidIsRunning(pid);
-    if (running) runningCount += 1;
-    console.log(`  ${label}: ${running ? 'running' : 'not running'} (PID: ${pid})`);
+    service.running = pidIsRunning(pid);
+    console.log(`  ${label}: ${service.running ? 'running' : 'not running'} (PID: ${pid})`);
   }
 
-  process.exit(runningCount > 0 ? 0 : 1);
+  process.exit(requiredServices.every((service) => service.running) ? 0 : 1);
 }
 
 if (mode === 'status') {

@@ -232,6 +232,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
     assert.match(pkg.scripts.start, /start-entry\.mjs start\b/, 'pnpm start must route through start-entry.mjs');
   });
+
   it('package.json scripts.start:status routes through start-entry.mjs for Windows pnpm shells', () => {
     const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
 
@@ -255,6 +256,20 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     assert.ok(
       source.includes("'start-dev.sh'), '--status'"),
       'non-Windows status path must preserve start-dev.sh status',
+    );
+    assert.ok(
+      source.includes("getConfigValue(dotEnv, 'API_SERVER_PORT') ?? '3004'"),
+      'Windows status must derive the active API port from .env/process env',
+    );
+    assert.ok(
+      source.includes("getConfigValue(dotEnv, 'FRONTEND_PORT') ?? '3003'"),
+      'Windows status must derive the active web port from .env/process env',
+    );
+    assert.match(source, /api-\$\{apiPort\}\.pid/, 'Windows status must check the required API PID file');
+    assert.match(source, /web-\$\{webPort\}\.pid/, 'Windows status must check the required web PID file');
+    assert.ok(
+      source.includes('requiredServices.every((service) => service.running)'),
+      'Windows status must only exit 0 when every required service is running',
     );
   });
 
