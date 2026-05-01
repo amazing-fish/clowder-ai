@@ -15,7 +15,7 @@ describe('StreamingOutboundHook', () => {
       sendReply: async () => {},
       sendPlaceholder: async (_chatId, _text) => 'msg-placeholder-1',
       editMessage: async (_chatId, _msgId, _text) => {},
-      deleteMessage: opts.noDelete ? undefined : async (_msgId) => {},
+      deleteMessage: opts.noDelete ? undefined : async (_chatId, _msgId) => {},
       finalizeStreamCard: opts.noFinalize ? undefined : async (_chatId, _msgId, _catName) => {},
       _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
     };
@@ -37,9 +37,9 @@ describe('StreamingOutboundHook', () => {
       return original.editMessage(chatId, msgId, text);
     };
     if (adapter.deleteMessage) {
-      adapter.deleteMessage = async (msgId) => {
-        adapter._calls.deleteMessage.push({ msgId });
-        return original.deleteMessage(msgId);
+      adapter.deleteMessage = async (chatId, msgId) => {
+        adapter._calls.deleteMessage.push({ chatId, msgId });
+        return original.deleteMessage(chatId, msgId);
       };
     }
     if (adapter.finalizeStreamCard) {
@@ -203,6 +203,7 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamEnd('thread-1', 'Final text');
     await hook.cleanupPlaceholders('thread-1');
     assert.equal(adapter._calls.deleteMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage[0].chatId, 'chat1');
     assert.equal(adapter._calls.deleteMessage[0].msgId, 'msg-placeholder-1');
   });
 
@@ -271,10 +272,12 @@ describe('StreamingOutboundHook', () => {
 
     await hook.cleanupPlaceholders('thread-1', 'inv-A');
     assert.equal(adapter._calls.deleteMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage[0].chatId, 'chat1');
     assert.equal(adapter._calls.deleteMessage[0].msgId, 'msg-placeholder-1');
 
     await hook.cleanupPlaceholders('thread-1', 'inv-B');
     assert.equal(adapter._calls.deleteMessage.length, 2);
+    assert.equal(adapter._calls.deleteMessage[1].chatId, 'chat1');
     assert.equal(adapter._calls.deleteMessage[1].msgId, 'msg-placeholder-2');
   });
 
@@ -307,6 +310,7 @@ describe('StreamingOutboundHook', () => {
 
     await hook.cleanupPlaceholders('thread-1', 'inv-A');
     assert.equal(adapter._calls.deleteMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage[0].chatId, 'chat1');
     assert.equal(adapter._calls.deleteMessage[0].msgId, 'msg-placeholder-1');
 
     // B's placeholder must still be pending (not deleted by A's cleanup)

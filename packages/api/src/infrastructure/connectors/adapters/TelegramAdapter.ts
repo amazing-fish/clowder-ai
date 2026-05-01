@@ -309,6 +309,13 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
   }
 
   /**
+   * Delete a message (used to clean up streaming placeholders after final delivery).
+   */
+  async deleteMessage(externalChatId: string, platformMessageId: string): Promise<void> {
+    await this.bot.api.deleteMessage(Number(externalChatId), Number(platformMessageId));
+  }
+
+  /**
    * Phase 5+6: Send a media message (image, file, or audio) to a Telegram chat.
    * Handles both public URLs and local file paths (via grammy InputFile).
    */

@@ -42,7 +42,7 @@ export interface IStreamableOutboundAdapter extends IOutboundAdapter {
   /** Edit an already-sent message in place. */
   editMessage(externalChatId: string, platformMessageId: string, text: string): Promise<void>;
   /** Delete a message by platform message ID (cleanup after streaming). */
-  deleteMessage?(platformMessageId: string): Promise<void>;
+  deleteMessage?(externalChatId: string, platformMessageId: string): Promise<void>;
   /**
    * F157: Edit a streaming placeholder to a minimal completion state (e.g. "✅ 已回复").
    * When present, cleanup prefers this over deleteMessage to avoid "recall" notifications.
