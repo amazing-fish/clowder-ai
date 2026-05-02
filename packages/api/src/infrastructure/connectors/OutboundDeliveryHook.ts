@@ -41,6 +41,14 @@ export interface IStreamableOutboundAdapter extends IOutboundAdapter {
   sendPlaceholder(externalChatId: string, text: string): Promise<string>;
   /** Edit an already-sent message in place. */
   editMessage(externalChatId: string, platformMessageId: string, text: string): Promise<void>;
+  /** Edit an already-sent message in place with rich-block formatting. */
+  editRichMessage?(
+    externalChatId: string,
+    platformMessageId: string,
+    textContent: string,
+    blocks: RichBlock[],
+    catDisplayName: string,
+  ): Promise<void>;
   /** Delete a message by platform message ID (cleanup after streaming). */
   deleteMessage?(platformMessageId: string): Promise<void>;
   /**
@@ -94,8 +102,18 @@ export class OutboundDeliveryHook {
     threadMeta?: ThreadMeta,
     origin?: MessageOrigin,
     triggerMessageId?: string,
+    skipConnectorIds?: ReadonlySet<string>,
   ): Promise<void> {
-    return this.executeDelivery(threadId, content, catId, richBlocks, threadMeta, origin, triggerMessageId);
+    return this.executeDelivery(
+      threadId,
+      content,
+      catId,
+      richBlocks,
+      threadMeta,
+      origin,
+      triggerMessageId,
+      skipConnectorIds,
+    );
   }
 
   private async executeDelivery(
@@ -106,12 +124,15 @@ export class OutboundDeliveryHook {
     threadMeta?: ThreadMeta,
     origin?: MessageOrigin,
     triggerMessageId?: string,
+    skipConnectorIds?: ReadonlySet<string>,
   ): Promise<void> {
     this.opts.log.info(
       { threadId, catId, contentLen: content.length, hasRichBlocks: !!(richBlocks && richBlocks.length) },
       '[OutboundDeliveryHook] deliver() called',
     );
-    const bindings = await this.opts.bindingStore.getByThread(threadId);
+    const bindings = (await this.opts.bindingStore.getByThread(threadId)).filter(
+      (binding) => !skipConnectorIds?.has(binding.connectorId),
+    );
     if (bindings.length === 0) {
       this.opts.log.warn(
         { threadId },

@@ -290,6 +290,11 @@ export class ConnectorInvokeTrigger {
       // post_message callbacks from later cats interleave with earlier outboundTurns.
       const deliveredTurnIndices = new Set<number>();
       const DELIVER_TIMEOUT_MS = this.opts.deliverTimeoutMs ?? 10_000;
+      const getPendingInlineSkipConnectorIds = (): ReadonlySet<string> | undefined => {
+        const connectorIds =
+          this.opts.streamingHook?.getInlineFinalDeliveryConnectorIds(threadId, createResult.invocationId) ?? [];
+        return connectorIds.length > 0 ? new Set(connectorIds) : undefined;
+      };
 
       // Start threadMeta lookup early — resolved lazily when first delivery needs it.
       let threadMeta: ThreadMeta | undefined;
@@ -375,6 +380,7 @@ export class ConnectorInvokeTrigger {
                     threadMeta,
                     undefined,
                     messageId,
+                    getPendingInlineSkipConnectorIds(),
                   ),
                   new Promise<void>((_, reject) =>
                     setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
@@ -442,8 +448,12 @@ export class ConnectorInvokeTrigger {
 
         // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
         const finalContent = collectedTextParts.join('');
+        const allFinalRichBlocks = outboundTurns.flatMap((turn) => turn.richBlocks ?? []);
+        const finalRichBlocks =
+          allFinalRichBlocks.length > 0 ? allFinalRichBlocks : persistenceContext.richBlocks;
 
         // Phase 4: Finalize streaming — ensure start completed before ending
+        let streamEndResult: { inlineDeliveredConnectorIds?: string[] } | undefined;
         if (this.opts.streamingHook) {
           if (streamStartPromise) {
             const STREAM_START_TIMEOUT_MS = 5000;
@@ -452,10 +462,16 @@ export class ConnectorInvokeTrigger {
               new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
             ]);
           }
-          await this.opts.streamingHook.onStreamEnd(threadId, finalContent, createResult.invocationId).catch((err) => {
-            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
-          });
+          streamEndResult = await this.opts.streamingHook
+            .onStreamEnd(threadId, finalContent, createResult.invocationId, finalRichBlocks)
+            .catch((err) => {
+              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
+              return undefined;
+            });
         }
+        const inlineDeliveredConnectorIds = streamEndResult?.inlineDeliveredConnectorIds ?? [];
+        const skipConnectorIds =
+          inlineDeliveredConnectorIds.length > 0 ? new Set<string>(inlineDeliveredConnectorIds) : undefined;
 
         // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
         const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
@@ -502,6 +518,7 @@ export class ConnectorInvokeTrigger {
                 threadMeta,
                 undefined,
                 messageId,
+                skipConnectorIds,
               );
               inflightDeliverPromises.push(deliverPromise);
               try {
@@ -527,6 +544,7 @@ export class ConnectorInvokeTrigger {
               threadMeta,
               undefined,
               messageId,
+              skipConnectorIds,
             );
             inflightDeliverPromises.push(deliverPromise);
             try {
@@ -551,6 +569,7 @@ export class ConnectorInvokeTrigger {
               threadMeta,
               undefined,
               messageId,
+              skipConnectorIds,
             );
             inflightDeliverPromises.push(deliverPromise);
             try {

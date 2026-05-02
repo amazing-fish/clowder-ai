@@ -1,4 +1,4 @@
-import { type CatId, catRegistry } from '@cat-cafe/shared';
+import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { pickReceiptLine } from './feishu-receipt-lines.js';
@@ -15,6 +15,10 @@ interface StreamingSession {
   platformMessageId: string;
   lastUpdateAt: number;
   lastContentLength: number;
+}
+
+export interface StreamEndResult {
+  readonly inlineDeliveredConnectorIds: string[];
 }
 
 export interface StreamingOutboundHookOptions {
@@ -39,6 +43,22 @@ export class StreamingOutboundHook {
   /** Scope key for isolation: `threadId:invocationId` when available, else `threadId`. */
   private scopeKey(threadId: string, invocationId?: string): string {
     return invocationId ? `${threadId}:${invocationId}` : threadId;
+  }
+
+  private isInlineFinalDeliverySession(session: StreamingSession): boolean {
+    const adapter = this.opts.adapters.get(session.connectorId);
+    return !!adapter?.editMessage && !adapter.deleteMessage && !adapter.finalizeStreamCard;
+  }
+
+  getInlineFinalDeliveryConnectorIds(threadId: string, invocationId?: string): string[] {
+    const key = this.scopeKey(threadId, invocationId);
+    const sessions = this.sessions.get(key);
+    if (!sessions) return [];
+    return [
+      ...new Set(
+        sessions.filter((session) => this.isInlineFinalDeliverySession(session)).map((session) => session.connectorId),
+      ),
+    ];
   }
 
   async onStreamStart(
@@ -107,22 +127,39 @@ export class StreamingOutboundHook {
     }
   }
 
-  async onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void> {
+  async onStreamEnd(
+    threadId: string,
+    finalText: string,
+    invocationId?: string,
+    richBlocks?: RichBlock[],
+  ): Promise<StreamEndResult> {
     const key = this.scopeKey(threadId, invocationId);
     const sessions = this.sessions.get(key);
-    if (!sessions) return;
+    if (!sessions) return { inlineDeliveredConnectorIds: [] };
     this.sessions.delete(key);
 
     const deferred: StreamingSession[] = [];
+    const inlineDeliveredConnectorIds = new Set<string>();
     for (const session of sessions) {
       const adapter = this.opts.adapters.get(session.connectorId);
       if (!session.platformMessageId) continue;
       if (adapter?.deleteMessage || adapter?.finalizeStreamCard) {
         // Defer cleanup — keep placeholder as fallback until outbound delivery succeeds
         deferred.push(session);
-      } else if (adapter?.editMessage) {
+      } else if (this.isInlineFinalDeliverySession(session)) {
         try {
-          await adapter.editMessage(session.externalChatId, session.platformMessageId, finalText);
+          if (richBlocks?.length && adapter?.editRichMessage) {
+            await adapter.editRichMessage(
+              session.externalChatId,
+              session.platformMessageId,
+              finalText,
+              richBlocks,
+              session.catDisplayName,
+            );
+          } else {
+            await adapter?.editMessage(session.externalChatId, session.platformMessageId, finalText);
+          }
+          inlineDeliveredConnectorIds.add(session.connectorId);
         } catch (err) {
           this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd editMessage failed');
         }
@@ -131,6 +168,7 @@ export class StreamingOutboundHook {
     if (deferred.length > 0) {
       this.pendingCleanup.set(key, deferred);
     }
+    return { inlineDeliveredConnectorIds: [...inlineDeliveredConnectorIds] };
   }
 
   /**

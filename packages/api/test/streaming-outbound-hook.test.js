@@ -15,9 +15,14 @@ describe('StreamingOutboundHook', () => {
       sendReply: async () => {},
       sendPlaceholder: async (_chatId, _text) => 'msg-placeholder-1',
       editMessage: async (_chatId, _msgId, _text) => {},
+      editRichMessage: opts.richEdit
+        ? async (_chatId, _msgId, _text, _blocks, _catName) => {
+            if (opts.richEditError) throw new Error('edit rich failed');
+          }
+        : undefined,
       deleteMessage: opts.noDelete ? undefined : async (_msgId) => {},
       finalizeStreamCard: opts.noFinalize ? undefined : async (_chatId, _msgId, _catName) => {},
-      _calls: { sendPlaceholder: [], editMessage: [], deleteMessage: [], finalizeStreamCard: [] },
+      _calls: { sendPlaceholder: [], editMessage: [], editRichMessage: [], deleteMessage: [], finalizeStreamCard: [] },
     };
   }
 
@@ -25,6 +30,7 @@ describe('StreamingOutboundHook', () => {
     const original = {
       sendPlaceholder: adapter.sendPlaceholder,
       editMessage: adapter.editMessage,
+      editRichMessage: adapter.editRichMessage,
       deleteMessage: adapter.deleteMessage,
       finalizeStreamCard: adapter.finalizeStreamCard,
     };
@@ -36,6 +42,12 @@ describe('StreamingOutboundHook', () => {
       adapter._calls.editMessage.push({ chatId, msgId, text });
       return original.editMessage(chatId, msgId, text);
     };
+    if (adapter.editRichMessage) {
+      adapter.editRichMessage = async (chatId, msgId, text, blocks, catName) => {
+        adapter._calls.editRichMessage.push({ chatId, msgId, text, blocks, catName });
+        return original.editRichMessage(chatId, msgId, text, blocks, catName);
+      };
+    }
     if (adapter.deleteMessage) {
       adapter.deleteMessage = async (msgId) => {
         adapter._calls.deleteMessage.push({ msgId });
@@ -213,6 +225,46 @@ describe('StreamingOutboundHook', () => {
     assert.equal(adapter._calls.editMessage.length, 1);
     assert.ok(adapter._calls.editMessage[0].text.includes('Final complete response'));
     assert.ok(!adapter._calls.editMessage[0].text.includes('▌'));
+  });
+
+  it('onStreamEnd reports edit-only connectors as inline delivered', async () => {
+    const { hook } = createHook({ noDelete: true, noFinalize: true });
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text');
+
+    assert.deepEqual(result.inlineDeliveredConnectorIds, ['feishu']);
+  });
+
+  it('onStreamEnd uses rich in-place edit for edit-only connectors with richBlocks', async () => {
+    const { hook, adapter } = createHook({ noDelete: true, noFinalize: true, richEdit: true });
+    const richBlocks = [{ kind: 'diff', filePath: 'src/example.ts', diff: '+const answer = 42;' }];
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text', undefined, richBlocks);
+
+    assert.equal(adapter._calls.editMessage.length, 0);
+    assert.equal(adapter._calls.editRichMessage.length, 1);
+    assert.deepEqual(adapter._calls.editRichMessage[0].blocks, richBlocks);
+    assert.deepEqual(result.inlineDeliveredConnectorIds, ['feishu']);
+  });
+
+  it('onStreamEnd does not report inline delivery when rich in-place edit fails', async () => {
+    const { hook, adapter } = createHook({ noDelete: true, noFinalize: true, richEdit: true, richEditError: true });
+    const richBlocks = [{ kind: 'diff', filePath: 'src/example.ts', diff: '+const answer = 42;' }];
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text', undefined, richBlocks);
+
+    assert.equal(adapter._calls.editRichMessage.length, 1);
+    assert.deepEqual(result.inlineDeliveredConnectorIds, []);
+  });
+
+  it('reports pending edit-only connectors before stream end', async () => {
+    const { hook } = createHook({ noDelete: true, noFinalize: true });
+    await hook.onStreamStart('thread-1');
+
+    assert.deepEqual(hook.getInlineFinalDeliveryConnectorIds('thread-1'), ['feishu']);
   });
 
   it('onStreamEnd cleans up session (second call is no-op)', async () => {

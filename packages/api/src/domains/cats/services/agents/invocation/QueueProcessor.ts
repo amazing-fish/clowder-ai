@@ -81,6 +81,7 @@ export interface OutboundDeliveryHookLike {
     threadMeta?: { threadShortId?: string; threadTitle?: string; deepLinkUrl?: string },
     origin?: string,
     triggerMessageId?: string,
+    skipConnectorIds?: ReadonlySet<string>,
   ): Promise<void>;
 }
 
@@ -93,7 +94,13 @@ export interface StreamingOutboundHookLike {
     senderHint?: { id: string; name?: string },
   ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
+  onStreamEnd(
+    threadId: string,
+    finalText: string,
+    invocationId: string,
+    richBlocks?: ReadonlyArray<{ kind: string; [key: string]: unknown }>,
+  ): Promise<{ inlineDeliveredConnectorIds?: string[] } | undefined>;
+  getInlineFinalDeliveryConnectorIds?(threadId: string, invocationId?: string): string[];
   cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
   notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
@@ -869,6 +876,11 @@ export class QueueProcessor {
       // F151: Mid-loop delivery to preserve ordering (same fix as ConnectorInvokeTrigger)
       const deliveredTurnIndices = new Set<number>();
       const DELIVER_TIMEOUT_MS = 10_000;
+      const getPendingInlineSkipConnectorIds = (): ReadonlySet<string> | undefined => {
+        const connectorIds =
+          this.deps.streamingHook?.getInlineFinalDeliveryConnectorIds?.(threadId, invocationId) ?? [];
+        return connectorIds.length > 0 ? new Set(connectorIds) : undefined;
+      };
       let threadMeta: ThreadMetaLike | undefined;
       let threadMetaPromise: Promise<ThreadMetaLike | undefined> | undefined;
       if (this.deps.outboundHook && this.deps.threadMetaLookup) {
@@ -971,6 +983,7 @@ export class QueueProcessor {
                     threadMeta,
                     undefined,
                     messageId ?? undefined,
+                    getPendingInlineSkipConnectorIds(),
                   ),
                   new Promise<void>((_, reject) =>
                     setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
@@ -1149,8 +1162,11 @@ export class QueueProcessor {
   ): Promise<void> {
     const finalContent =
       outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
+    const allFinalRichBlocks = outboundTurns.flatMap((turn) => turn.richBlocks ?? []);
+    const finalRichBlocks = allFinalRichBlocks.length > 0 ? allFinalRichBlocks : persistenceContext.richBlocks;
 
     // Finalize streaming — ensure start completed before ending
+    let streamEndResult: { inlineDeliveredConnectorIds?: string[] } | undefined;
     if (this.deps.streamingHook) {
       if (streamStartPromise) {
         const STREAM_START_TIMEOUT_MS = 5000;
@@ -1159,10 +1175,16 @@ export class QueueProcessor {
           new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
         ]);
       }
-      await this.deps.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
-        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamEnd failed');
-      });
+      streamEndResult = await this.deps.streamingHook
+        .onStreamEnd(threadId, finalContent, invocationId, finalRichBlocks)
+        .catch((err) => {
+          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamEnd failed');
+          return undefined;
+        });
     }
+    const inlineDeliveredConnectorIds = streamEndResult?.inlineDeliveredConnectorIds ?? [];
+    const skipConnectorIds =
+      inlineDeliveredConnectorIds.length > 0 ? new Set<string>(inlineDeliveredConnectorIds) : undefined;
 
     const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
     if (this.deps.outboundHook && hasContent) {
@@ -1211,6 +1233,7 @@ export class QueueProcessor {
             threadMeta,
             undefined,
             triggerMessageId,
+            skipConnectorIds,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {
@@ -1236,6 +1259,7 @@ export class QueueProcessor {
           threadMeta,
           undefined,
           triggerMessageId,
+          skipConnectorIds,
         );
         inflightDeliverPromises.push(deliverPromise);
         try {
@@ -1261,6 +1285,7 @@ export class QueueProcessor {
             threadMeta,
             undefined,
             triggerMessageId,
+            skipConnectorIds,
           );
           inflightDeliverPromises.push(deliverPromise);
           try {

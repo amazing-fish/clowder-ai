@@ -514,6 +514,42 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(deliverCalls[0].content, 'Review noted. Working on it.');
   });
 
+  it('passes inline-delivered connectors from streaming end to connector outbound delivery', async () => {
+    const deliverCalls = /** @type {Array<{skipConnectorIds: Set<string> | undefined}>} */ ([]);
+    const outboundHook = {
+      deliver: async (
+        _threadId,
+        _content,
+        _catId,
+        _richBlocks,
+        _threadMeta,
+        _origin,
+        _triggerMessageId,
+        skipConnectorIds,
+      ) => {
+        deliverCalls.push({ skipConnectorIds });
+      },
+    };
+    const streamingHook = {
+      async onStreamStart() {},
+      async onStreamChunk() {},
+      async onStreamEnd() {
+        return { inlineDeliveredConnectorIds: ['telegram'] };
+      },
+      getInlineFinalDeliveryConnectorIds() {
+        return ['telegram'];
+      },
+      async cleanupPlaceholders() {},
+    };
+
+    const trigger = createTrigger({ outboundHook, streamingHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(deliverCalls.length, 1);
+    assert.deepStrictEqual([...(deliverCalls[0].skipConnectorIds ?? [])], ['telegram']);
+  });
+
   it('R1-P1: delivers richBlocks-only reply (no text) via outbound hook', async () => {
     // Router yields only richBlocks with no text content
     const richOnlyRouter = /** @type {any} */ ({

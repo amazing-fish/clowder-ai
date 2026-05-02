@@ -66,6 +66,7 @@ interface OutboundDeliveryHookLike {
     threadMeta?: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string },
     origin?: string,
     triggerMessageId?: string,
+    skipConnectorIds?: ReadonlySet<string>,
   ): Promise<void>;
 }
 
@@ -78,7 +79,13 @@ interface StreamingHookLike {
     senderHint?: { id: string; name?: string },
   ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  onStreamEnd(
+    threadId: string,
+    finalText: string,
+    invocationId?: string,
+    richBlocks?: unknown[],
+  ): Promise<{ inlineDeliveredConnectorIds?: string[] } | undefined>;
+  getInlineFinalDeliveryConnectorIds?(threadId: string, invocationId?: string): string[];
   cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that an invocation's delivery batch is complete. */
   notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
@@ -1492,7 +1499,17 @@ export async function deliverOutboundFromWeb(
 ): Promise<void> {
   const finalContent =
     outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
+  const nonEmptyTurns = outboundTurns.filter(
+    (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
+  );
+  const finalRichBlocks =
+    nonEmptyTurns.length > 1
+      ? nonEmptyTurns.flatMap((turn) => turn.richBlocks ?? [])
+      : nonEmptyTurns.length === 1
+        ? (persistenceContext.richBlocks ?? nonEmptyTurns[0].richBlocks)
+        : persistenceContext.richBlocks;
 
+  let streamEndResult: { inlineDeliveredConnectorIds?: string[] } | undefined;
   if (opts.streamingHook) {
     if (streamStartPromise) {
       await Promise.race([
@@ -1500,10 +1517,16 @@ export async function deliverOutboundFromWeb(
         new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
       ]);
     }
-    await opts.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
-      logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamEnd failed');
-    });
+    streamEndResult = await opts.streamingHook
+      .onStreamEnd(threadId, finalContent, invocationId, finalRichBlocks)
+      .catch((err) => {
+        logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamEnd failed');
+        return undefined;
+      });
   }
+  const inlineDeliveredConnectorIds = streamEndResult?.inlineDeliveredConnectorIds ?? [];
+  const skipConnectorIds =
+    inlineDeliveredConnectorIds.length > 0 ? new Set<string>(inlineDeliveredConnectorIds) : undefined;
 
   const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
   if (!opts.outboundHook || !hasContent) {
@@ -1537,17 +1560,22 @@ export async function deliverOutboundFromWeb(
   }
 
   const DELIVER_TIMEOUT_MS = 10_000;
-  const nonEmptyTurns = outboundTurns.filter(
-    (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
-  );
-
   let deliveryFailed = false;
   const inflightDeliverPromises: Promise<void>[] = [];
 
   if (nonEmptyTurns.length > 1) {
     for (const turn of nonEmptyTurns) {
       const turnContent = turn.textParts.join('');
-      const deliverPromise = opts.outboundHook.deliver(threadId, turnContent, turn.catId, turn.richBlocks, threadMeta);
+      const deliverPromise = opts.outboundHook.deliver(
+        threadId,
+        turnContent,
+        turn.catId,
+        turn.richBlocks,
+        threadMeta,
+        undefined,
+        undefined,
+        skipConnectorIds,
+      );
       inflightDeliverPromises.push(deliverPromise);
       try {
         await Promise.race([
@@ -1562,7 +1590,16 @@ export async function deliverOutboundFromWeb(
   } else if (nonEmptyTurns.length === 1) {
     const turn = nonEmptyTurns[0];
     const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
-    const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, turn.catId, richBlocks, threadMeta);
+    const deliverPromise = opts.outboundHook.deliver(
+      threadId,
+      finalContent,
+      turn.catId,
+      richBlocks,
+      threadMeta,
+      undefined,
+      undefined,
+      skipConnectorIds,
+    );
     inflightDeliverPromises.push(deliverPromise);
     try {
       await Promise.race([
@@ -1576,7 +1613,16 @@ export async function deliverOutboundFromWeb(
   } else {
     const richBlocks = persistenceContext.richBlocks;
     if (richBlocks) {
-      const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, primaryCat, richBlocks, threadMeta);
+      const deliverPromise = opts.outboundHook.deliver(
+        threadId,
+        finalContent,
+        primaryCat,
+        richBlocks,
+        threadMeta,
+        undefined,
+        undefined,
+        skipConnectorIds,
+      );
       inflightDeliverPromises.push(deliverPromise);
       try {
         await Promise.race([

@@ -28,8 +28,17 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     streamCalls = { start: [], chunk: [], end: [], cleanup: [] };
 
     mockOutboundHook = {
-      async deliver(threadId, content, catId, richBlocks, threadMeta) {
-        deliverCalls.push({ threadId, content, catId, richBlocks, threadMeta });
+      async deliver(threadId, content, catId, richBlocks, threadMeta, origin, triggerMessageId, skipConnectorIds) {
+        deliverCalls.push({
+          threadId,
+          content,
+          catId,
+          richBlocks,
+          threadMeta,
+          origin,
+          triggerMessageId,
+          skipConnectorIds,
+        });
       },
     };
 
@@ -40,8 +49,8 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
       async onStreamChunk(threadId, text, invocationId) {
         streamCalls.chunk.push({ threadId, text, invocationId });
       },
-      async onStreamEnd(threadId, text, invocationId) {
-        streamCalls.end.push({ threadId, text, invocationId });
+      async onStreamEnd(threadId, text, invocationId, richBlocks) {
+        streamCalls.end.push({ threadId, text, invocationId, richBlocks });
       },
       async cleanupPlaceholders(threadId, invocationId) {
         streamCalls.cleanup.push({ threadId, invocationId });
@@ -160,6 +169,56 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(streamCalls.end[0].text, 'hi');
     assert.equal(streamCalls.cleanup.length, 1);
     assert.equal(streamCalls.cleanup[0].threadId, 't-1');
+  });
+
+  it('passes inline-delivered connectors from streaming end to outbound delivery', async () => {
+    mockStreamingHook.onStreamEnd = async (threadId, text, invocationId) => {
+      streamCalls.end.push({ threadId, text, invocationId });
+      return { inlineDeliveredConnectorIds: ['telegram'] };
+    };
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const turns = [{ catId: 'opus', textParts: ['hi'] }];
+    const ctx = { failed: false, errors: [] };
+
+    await deliverOutboundFromWeb('t-1', 'opus', 'inv-1', ['hi'], turns, ctx, undefined, opts, noopLog());
+
+    assert.equal(deliverCalls.length, 1);
+    assert.deepEqual([...deliverCalls[0].skipConnectorIds], ['telegram']);
+  });
+
+  it('does not skip outbound delivery when streaming end reports no inline delivery', async () => {
+    mockStreamingHook.onStreamEnd = async (threadId, text, invocationId) => {
+      streamCalls.end.push({ threadId, text, invocationId });
+      return { inlineDeliveredConnectorIds: [] };
+    };
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const turns = [{ catId: 'opus', textParts: ['hi'] }];
+    const ctx = { failed: false, errors: [] };
+
+    await deliverOutboundFromWeb('t-1', 'opus', 'inv-1', ['hi'], turns, ctx, undefined, opts, noopLog());
+
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].skipConnectorIds, undefined);
+  });
+
+  it('passes final richBlocks to streaming end for inline final rich edit', async () => {
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const richBlocks = [{ kind: 'diff', filePath: 'src/example.ts', diff: '+const answer = 42;' }];
+    const turns = [{ catId: 'opus', textParts: ['hi'], richBlocks }];
+    const ctx = { failed: false, errors: [] };
+
+    await deliverOutboundFromWeb('t-1', 'opus', 'inv-1', ['hi'], turns, ctx, undefined, opts, noopLog());
+
+    assert.deepEqual(streamCalls.end[0].richBlocks, richBlocks);
   });
 
   it('cleans up placeholders even when no outbound hook (stream-only)', async () => {

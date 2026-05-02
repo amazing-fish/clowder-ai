@@ -79,6 +79,26 @@ describe('OutboundDeliveryHook', () => {
     assert.equal(telegramMock.sent.length, 1);
   });
 
+  it('skips delivery to connectors already finalized inline by streaming', async () => {
+    const telegramMock = mockAdapter('telegram');
+    const adapters = new Map([
+      ['feishu', feishuMock.adapter],
+      ['telegram', telegramMock.adapter],
+    ]);
+    hook = new OutboundDeliveryHook({
+      bindingStore,
+      adapters,
+      log: noopLog(),
+    });
+
+    bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+    bindingStore.bind('telegram', 'chat-2', 'thread-abc', 'user-1');
+    await hook.deliver('thread-abc', 'Hello!', undefined, undefined, undefined, undefined, undefined, new Set(['telegram']));
+
+    assert.equal(feishuMock.sent.length, 1);
+    assert.equal(telegramMock.sent.length, 0);
+  });
+
   it('does not throw when adapter.sendReply fails', async () => {
     const failAdapter = {
       connectorId: 'feishu',

@@ -186,6 +186,26 @@ describe('TelegramAdapter', () => {
     });
   });
 
+  describe('editRichMessage()', () => {
+    it('edits the existing Telegram message with HTML parse mode', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const editCalls = [];
+      adapter.bot.api.editMessageText = async (chatId, messageId, text, opts) => {
+        editCalls.push({ chatId, messageId, text, opts });
+      };
+
+      const blocks = [{ id: 'b1', kind: 'card', v: 1, title: 'Review', bodyMarkdown: 'LGTM' }];
+      await adapter.editRichMessage('1001', '2002', 'text', blocks, '布偶猫');
+
+      assert.equal(editCalls.length, 1);
+      assert.equal(editCalls[0].chatId, 1001);
+      assert.equal(editCalls[0].messageId, 2002);
+      assert.deepEqual(editCalls[0].opts, { parse_mode: 'HTML' });
+      assert.ok(editCalls[0].text.includes('Review'));
+      assert.ok(editCalls[0].text.includes('text'));
+    });
+  });
+
   describe('startPolling()', () => {
     it('releases the Telegram session and retries after a 409 polling conflict', async () => {
       const { entries, log } = recordingLog();

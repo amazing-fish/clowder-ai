@@ -309,6 +309,22 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
   }
 
   /**
+   * Edit an already-sent message in place with Telegram HTML rich-block formatting.
+   */
+  async editRichMessage(
+    externalChatId: string,
+    platformMessageId: string,
+    textContent: string,
+    blocks: RichBlock[],
+    catDisplayName: string,
+  ): Promise<void> {
+    const html = formatTelegramHtml(blocks, catDisplayName, textContent);
+    await this.bot.api.editMessageText(Number(externalChatId), Number(platformMessageId), html, {
+      parse_mode: 'HTML',
+    });
+  }
+
+  /**
    * Phase 5+6: Send a media message (image, file, or audio) to a Telegram chat.
    * Handles both public URLs and local file paths (via grammy InputFile).
    */
