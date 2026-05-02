@@ -12,6 +12,7 @@ describe('StreamingOutboundHook', () => {
   function createMockAdapter(opts = {}) {
     return {
       connectorId: 'feishu',
+      finalDeliveryMode: opts.finalDeliveryMode,
       sendReply: async () => {},
       sendPlaceholder: async (_chatId, _text) => 'msg-placeholder-1',
       editMessage: async (_chatId, _msgId, _text) => {},
@@ -247,6 +248,52 @@ describe('StreamingOutboundHook', () => {
     assert.equal(adapter._calls.editRichMessage.length, 1);
     assert.deepEqual(adapter._calls.editRichMessage[0].blocks, richBlocks);
     assert.deepEqual(result.inlineDeliveredConnectorIds, ['feishu']);
+  });
+
+  it('onStreamEnd honors inline-edit mode even when delete cleanup is available', async () => {
+    const { hook, adapter } = createHook({ noFinalize: true, finalDeliveryMode: 'inline-edit' });
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text');
+
+    assert.equal(adapter._calls.editMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage.length, 0);
+    assert.deepEqual(result.inlineDeliveredConnectorIds, ['feishu']);
+  });
+
+  it('onStreamEnd does not use rich in-place edit for media richBlocks', async () => {
+    const { hook, adapter } = createHook({ noDelete: true, noFinalize: true, richEdit: true });
+    const richBlocks = [
+      {
+        kind: 'media_gallery',
+        items: [{ type: 'image', url: 'https://example.com/cat.png' }],
+      },
+    ];
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text', undefined, richBlocks);
+
+    assert.equal(adapter._calls.editRichMessage.length, 0);
+    assert.deepEqual(result.inlineDeliveredConnectorIds, []);
+  });
+
+  it('onStreamEnd defers media richBlocks for inline-edit connectors with delete cleanup', async () => {
+    const { hook, adapter } = createHook({ noFinalize: true, finalDeliveryMode: 'inline-edit', richEdit: true });
+    const richBlocks = [
+      {
+        kind: 'media_gallery',
+        items: [{ type: 'image', url: 'https://example.com/cat.png' }],
+      },
+    ];
+    await hook.onStreamStart('thread-1');
+
+    const result = await hook.onStreamEnd('thread-1', 'Final complete response text', undefined, richBlocks);
+    await hook.cleanupPlaceholders('thread-1');
+
+    assert.equal(adapter._calls.editRichMessage.length, 0);
+    assert.deepEqual(result.inlineDeliveredConnectorIds, []);
+    assert.equal(adapter._calls.deleteMessage.length, 1);
+    assert.equal(adapter._calls.deleteMessage[0].msgId, 'msg-placeholder-1');
   });
 
   it('onStreamEnd does not report inline delivery when rich in-place edit fails', async () => {

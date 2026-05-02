@@ -99,6 +99,39 @@ describe('OutboundDeliveryHook', () => {
     assert.equal(telegramMock.sent.length, 0);
   });
 
+  it('does not skip media rich block delivery for connectors marked inline-delivered', async () => {
+    const mediaSent = [];
+    const telegramAdapter = {
+      connectorId: 'telegram',
+      async sendReply() {},
+      async sendRichMessage() {},
+      async sendMedia(externalChatId, payload) {
+        mediaSent.push({ externalChatId, payload });
+      },
+    };
+    hook = new OutboundDeliveryHook({
+      bindingStore,
+      adapters: new Map([['telegram', telegramAdapter]]),
+      log: noopLog(),
+    });
+
+    bindingStore.bind('telegram', 'chat-2', 'thread-abc', 'user-1');
+    await hook.deliver(
+      'thread-abc',
+      'Here is the image',
+      undefined,
+      [{ kind: 'media_gallery', items: [{ type: 'image', url: 'https://example.com/cat.png' }] }],
+      undefined,
+      undefined,
+      undefined,
+      new Set(['telegram']),
+    );
+
+    assert.equal(mediaSent.length, 1);
+    assert.equal(mediaSent[0].externalChatId, 'chat-2');
+    assert.equal(mediaSent[0].payload.type, 'image');
+  });
+
   it('does not throw when adapter.sendReply fails', async () => {
     const failAdapter = {
       connectorId: 'feishu',

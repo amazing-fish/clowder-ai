@@ -9,6 +9,12 @@ import { ConnectorMessageFormatter, type MessageEnvelope, type MessageOrigin } f
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { renderAllRichBlocksPlaintext } from './rich-block-plaintext.js';
 
+const MEDIA_RICH_BLOCK_KINDS = new Set(['audio', 'file', 'media_gallery']);
+
+function hasMediaRichBlocks(blocks?: readonly RichBlock[]): boolean {
+  return blocks?.some((block) => MEDIA_RICH_BLOCK_KINDS.has(block.kind)) ?? false;
+}
+
 export interface IOutboundAdapter {
   readonly connectorId: string;
   sendReply(externalChatId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
@@ -37,6 +43,8 @@ export interface IOutboundAdapter {
 
 /** Adapter that supports edit-in-place streaming (placeholder → progressive edits). */
 export interface IStreamableOutboundAdapter extends IOutboundAdapter {
+  /** Adapter explicitly wants final non-media streaming output to be edited in place. */
+  readonly finalDeliveryMode?: 'inline-edit';
   /** Send a placeholder message and return its platform-level message ID. */
   sendPlaceholder(externalChatId: string, text: string): Promise<string>;
   /** Edit an already-sent message in place. */
@@ -50,7 +58,7 @@ export interface IStreamableOutboundAdapter extends IOutboundAdapter {
     catDisplayName: string,
   ): Promise<void>;
   /** Delete a message by platform message ID (cleanup after streaming). */
-  deleteMessage?(platformMessageId: string): Promise<void>;
+  deleteMessage?(platformMessageId: string, externalChatId?: string): Promise<void>;
   /**
    * F157: Edit a streaming placeholder to a minimal completion state (e.g. "✅ 已回复").
    * When present, cleanup prefers this over deleteMessage to avoid "recall" notifications.
@@ -130,8 +138,9 @@ export class OutboundDeliveryHook {
       { threadId, catId, contentLen: content.length, hasRichBlocks: !!(richBlocks && richBlocks.length) },
       '[OutboundDeliveryHook] deliver() called',
     );
+    const currentDeliveryHasMedia = hasMediaRichBlocks(richBlocks);
     const bindings = (await this.opts.bindingStore.getByThread(threadId)).filter(
-      (binding) => !skipConnectorIds?.has(binding.connectorId),
+      (binding) => currentDeliveryHasMedia || !skipConnectorIds?.has(binding.connectorId),
     );
     if (bindings.length === 0) {
       this.opts.log.warn(

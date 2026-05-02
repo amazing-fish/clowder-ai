@@ -6,6 +6,11 @@ import type { IStreamableOutboundAdapter } from './OutboundDeliveryHook.js';
 
 const DEFAULT_UPDATE_INTERVAL_MS = 2000;
 const DEFAULT_MIN_DELTA_CHARS = 200;
+const MEDIA_RICH_BLOCK_KINDS = new Set(['audio', 'file', 'media_gallery']);
+
+function hasMediaRichBlocks(blocks?: readonly RichBlock[]): boolean {
+  return blocks?.some((block) => MEDIA_RICH_BLOCK_KINDS.has(block.kind)) ?? false;
+}
 
 interface StreamingSession {
   readonly connectorId: string;
@@ -47,7 +52,10 @@ export class StreamingOutboundHook {
 
   private isInlineFinalDeliverySession(session: StreamingSession): boolean {
     const adapter = this.opts.adapters.get(session.connectorId);
-    return !!adapter?.editMessage && !adapter.deleteMessage && !adapter.finalizeStreamCard;
+    return (
+      !!adapter?.editMessage &&
+      (adapter.finalDeliveryMode === 'inline-edit' || (!adapter.deleteMessage && !adapter.finalizeStreamCard))
+    );
   }
 
   getInlineFinalDeliveryConnectorIds(threadId: string, invocationId?: string): string[] {
@@ -138,14 +146,18 @@ export class StreamingOutboundHook {
     if (!sessions) return { inlineDeliveredConnectorIds: [] };
     this.sessions.delete(key);
 
+    const currentDeliveryHasMedia = hasMediaRichBlocks(richBlocks);
     const deferred: StreamingSession[] = [];
     const inlineDeliveredConnectorIds = new Set<string>();
     for (const session of sessions) {
       const adapter = this.opts.adapters.get(session.connectorId);
       if (!session.platformMessageId) continue;
-      if (adapter?.deleteMessage || adapter?.finalizeStreamCard) {
-        // Defer cleanup — keep placeholder as fallback until outbound delivery succeeds
-        deferred.push(session);
+
+      if (currentDeliveryHasMedia) {
+        if (adapter?.deleteMessage || adapter?.finalizeStreamCard) {
+          // Media cannot be represented by message edits; let outbound delivery send it, then clean up.
+          deferred.push(session);
+        }
       } else if (this.isInlineFinalDeliverySession(session)) {
         try {
           if (richBlocks?.length && adapter?.editRichMessage) {
@@ -163,6 +175,9 @@ export class StreamingOutboundHook {
         } catch (err) {
           this.opts.log.warn({ err }, '[StreamingOutbound] onStreamEnd editMessage failed');
         }
+      } else if (adapter?.deleteMessage || adapter?.finalizeStreamCard) {
+        // Defer cleanup — keep placeholder as fallback until outbound delivery succeeds
+        deferred.push(session);
       }
     }
     if (deferred.length > 0) {
@@ -190,7 +205,7 @@ export class StreamingOutboundHook {
           // F157: Edit to completion state instead of deleting (no recall notification)
           await adapter.finalizeStreamCard(session.externalChatId, session.platformMessageId, session.catDisplayName);
         } else if (adapter?.deleteMessage) {
-          await adapter.deleteMessage(session.platformMessageId);
+          await adapter.deleteMessage(session.platformMessageId, session.externalChatId);
         }
       } catch (err) {
         this.opts.log.warn({ err }, '[StreamingOutbound] cleanupPlaceholders failed');

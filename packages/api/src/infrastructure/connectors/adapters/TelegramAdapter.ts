@@ -54,6 +54,7 @@ function isTelegramConflictError(err: unknown): boolean {
 
 export class TelegramAdapter implements IStreamableOutboundAdapter {
   readonly connectorId = 'telegram';
+  readonly finalDeliveryMode = 'inline-edit';
   private readonly bot: Bot;
   private readonly log: FastifyBaseLogger;
   private sendMessageFn: ((chatId: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>) | null =
@@ -322,6 +323,13 @@ export class TelegramAdapter implements IStreamableOutboundAdapter {
     await this.bot.api.editMessageText(Number(externalChatId), Number(platformMessageId), html, {
       parse_mode: 'HTML',
     });
+  }
+
+  async deleteMessage(platformMessageId: string, externalChatId?: string): Promise<void> {
+    if (!externalChatId) {
+      throw new Error('Telegram deleteMessage requires externalChatId');
+    }
+    await this.bot.api.deleteMessage(Number(externalChatId), Number(platformMessageId));
   }
 
   /**

@@ -206,6 +206,20 @@ describe('TelegramAdapter', () => {
     });
   });
 
+  describe('deleteMessage()', () => {
+    it('deletes the existing Telegram placeholder message', async () => {
+      const adapter = new TelegramAdapter('test-token', noopLog());
+      const deleteCalls = [];
+      adapter.bot.api.deleteMessage = async (chatId, messageId) => {
+        deleteCalls.push({ chatId, messageId });
+      };
+
+      await adapter.deleteMessage('2002', '1001');
+
+      assert.deepEqual(deleteCalls, [{ chatId: 1001, messageId: 2002 }]);
+    });
+  });
+
   describe('startPolling()', () => {
     it('releases the Telegram session and retries after a 409 polling conflict', async () => {
       const { entries, log } = recordingLog();
