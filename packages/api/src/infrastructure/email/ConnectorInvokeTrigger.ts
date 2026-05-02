@@ -449,8 +449,7 @@ export class ConnectorInvokeTrigger {
         // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
         const finalContent = collectedTextParts.join('');
         const allFinalRichBlocks = outboundTurns.flatMap((turn) => turn.richBlocks ?? []);
-        const finalRichBlocks =
-          allFinalRichBlocks.length > 0 ? allFinalRichBlocks : persistenceContext.richBlocks;
+        const finalRichBlocks = allFinalRichBlocks.length > 0 ? allFinalRichBlocks : persistenceContext.richBlocks;
 
         // Phase 4: Finalize streaming — ensure start completed before ending
         let streamEndResult: { inlineDeliveredConnectorIds?: string[] } | undefined;

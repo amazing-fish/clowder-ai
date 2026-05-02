@@ -93,7 +93,16 @@ describe('OutboundDeliveryHook', () => {
 
     bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
     bindingStore.bind('telegram', 'chat-2', 'thread-abc', 'user-1');
-    await hook.deliver('thread-abc', 'Hello!', undefined, undefined, undefined, undefined, undefined, new Set(['telegram']));
+    await hook.deliver(
+      'thread-abc',
+      'Hello!',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Set(['telegram']),
+    );
 
     assert.equal(feishuMock.sent.length, 1);
     assert.equal(telegramMock.sent.length, 0);
