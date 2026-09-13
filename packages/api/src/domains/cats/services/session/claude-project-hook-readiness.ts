@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 
 const PRECOMPACT_COMMAND = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/f24-pre-compact.sh';
 const PORTABLE_PRECOMPACT_COMMAND = `"${process.execPath.replaceAll('\\', '/')}" ".claude/hooks/f24-compaction.mjs" pre`;
@@ -13,6 +13,18 @@ const REQUIRED_CALLBACK_MARKERS = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPortablePreCompactCommand(command: string): boolean {
+  const match = /^"([^"\r\n]+)" "\.claude\/hooks\/f24-compaction\.mjs" pre$/.exec(command);
+  if (!match?.[1] || !isAbsolute(match[1])) return false;
+  try {
+    // Windows preserves launcher spelling in execPath. Compare the actual Node
+    // file, while keeping the script, arguments and synchronous hook contract exact.
+    return realpathSync.native(match[1]) === realpathSync.native(process.execPath);
+  } catch {
+    return false;
+  }
 }
 
 function hasCanonicalPreCompactCommand(settings: unknown, command = PRECOMPACT_COMMAND): boolean {
@@ -31,7 +43,9 @@ function hasCanonicalPreCompactCommand(settings: unknown, command = PRECOMPACT_C
         hook.type === 'command' &&
         hook.async !== true &&
         typeof hook.command === 'string' &&
-        hook.command.trim() === command,
+        (command === PORTABLE_PRECOMPACT_COMMAND
+          ? isPortablePreCompactCommand(hook.command.trim())
+          : hook.command.trim() === command),
     );
   });
 }
