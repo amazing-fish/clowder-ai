@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isClaudeProjectHookCarrierReady } from '../src/domains/cats/services/session/claude-project-hook-readiness.ts';
@@ -85,6 +85,55 @@ test('installed workspace becomes ready without Unix mode bits and preserves use
   writeFileSync(settingsPath, JSON.stringify(settings));
   assert.equal(isClaudeProjectHookCarrierReady(project), false);
   assert.notEqual((await run(installer, [...args, '--apply'])).code, 0, 'must respect explicit opt-out');
+});
+
+test('portable carrier identifies the same Node through filesystem aliases and rejects altered commands', async () => {
+  const project = join(scratch, 'runtime-alias');
+  const installer = join(root, 'scripts/install-claude-compaction-hooks.mjs');
+  assert.equal((await run(installer, ['--source-root', root, '--project-root', project, '--apply'])).code, 0);
+  const settingsPath = join(project, '.claude/settings.json');
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  const check = (command) => {
+    settings.hooks.PreCompact[0].hooks[0].command = command;
+    writeFileSync(settingsPath, JSON.stringify(settings));
+    return isClaudeProjectHookCarrierReady(project);
+  };
+  const commandFor = (executable) => `"${executable.replaceAll('\\', '/')}" ".claude/hooks/f24-compaction.mjs" pre`;
+  const alias = join(scratch, 'node alias');
+  symlinkSync(dirname(process.execPath), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    assert.equal(
+      check(commandFor(join(alias, basename(process.execPath)))),
+      true,
+      'directory alias is the same executable',
+    );
+  } finally {
+    if (process.platform === 'win32') rmdirSync(alias);
+    else rmSync(alias);
+  }
+  if (process.platform === 'win32') {
+    assert.equal(
+      check(commandFor(process.execPath.toUpperCase())),
+      true,
+      'Windows path casing must not change readiness',
+    );
+    assert.equal(check(commandFor(process.execPath.toLowerCase())), true);
+  }
+  const canonical = commandFor(process.execPath);
+  assert.equal(check(canonical), true);
+  const otherFile = join(scratch, 'other-node');
+  writeFileSync(otherFile, 'not the running Node');
+  for (const command of [
+    commandFor(otherFile),
+    commandFor(join(scratch, 'missing-node')),
+    commandFor('./node'),
+    `${canonical} && echo extra`,
+    canonical.replace(' pre', ' post'),
+    canonical.replace('f24-compaction.mjs', 'different.mjs'),
+    canonical.replace('" ".claude', '" --eval "code" ".claude'),
+  ]) {
+    assert.equal(check(command), false, `must reject altered command: ${command}`);
+  }
 });
 
 test('desktop packages and offline sync include the project carrier', () => {

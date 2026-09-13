@@ -33,7 +33,7 @@ Installing hook assets alone does not repair the old Windows predicate.
 
 ## Verification
 
-17 focused tests pass across portable installation, registered commands with empty PATH,
+18 focused tests pass across portable installation, registered commands with empty PATH,
 callback rejection, authenticated compaction, epoch replay, cursor preservation and readiness.
 The registered commands execute as real child processes against a real Fastify route using
 isolated in-memory session stores. A separate run against the installed API modules and bundled
@@ -43,3 +43,28 @@ The shared package TypeScript build and targeted readiness typecheck pass. Full 
 installer execution, full repository CI and live conversation acceptance have not been run.
 An independent reviewer approved after the packaging, Node-resolution, elevation and runtime
 migration findings were resolved. macOS automatic installation is outside this Windows repair.
+
+## Follow-up: launcher path spelling
+
+After the operator applied the first repair and restarted, the same rejection recurred.
+The configured Node path contained `apps`, while the actual API launch path contained `Apps`.
+The first repair compared the complete command with a string derived from `process.execPath`;
+Windows treats both executable paths as the same file, but that comparison returned false.
+Running the same readiness probe with those two launcher spellings reproduced true/false.
+The affected CLI transcript independently showed successful pre/post hooks and a successful
+compact boundary before the API rejected it. The first probe was therefore insufficient to
+claim that the live session was repaired.
+
+The portable command now requires the same exact script and argument shape, and compares the
+configured executable with the running Node using `realpathSync.native`. Directory junctions
+and Windows casing resolve to the same executable; missing/different files, relative paths,
+additional arguments, other scripts and chained commands remain rejected. Hook authentication,
+the current-invocation observation, explicit opt-out and synchronous execution requirements remain.
+
+The new alias test failed before the change and passes afterward, including both Windows path
+casings and negative command checks. The 18-test run uses this checkout's compiled shared
+package (an isolated resolver override, because the desktop dependency tree contains an older
+shared package); it does not replace installed dependencies. Strict readiness typecheck,
+format checks and the bundled Node probes with both launcher spellings also pass.
+The API caches this module, so replacing the on-disk file requires an application restart
+before live-session acceptance; no session records are reset or rewritten by this repair.
