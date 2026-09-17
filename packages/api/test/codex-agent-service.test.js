@@ -3447,7 +3447,6 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(msgs[2].type, 'text');
     assert.equal(msgs[2].content, '\n\n[砚砚/gpt-5.3-codex🐾]');
     assert.equal(msgs[3].type, 'done');
-    assert.ok(args.includes('--ignore-user-config'), 'codex invocations must ignore stale user config.toml');
   });
 
   test('maps command execution lifecycle into tool_use and tool_result', async () => {

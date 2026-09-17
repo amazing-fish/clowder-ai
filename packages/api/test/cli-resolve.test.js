@@ -23,7 +23,7 @@ test('formatCliNotFoundError returns install hint for known CLI', () => {
 test('formatCliNotFoundError returns native installer hint for agy', () => {
   const msg = formatCliNotFoundError('agy');
   assert.match(msg, /agy CLI 未找到/);
-  assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
+  assert.ok(msg.includes(`https://antigravity.google/cli/install.${process.platform === 'win32' ? 'cmd' : 'sh'}`));
 });
 
 test('formatCliNotFoundError points opencode users at the npm package that installs the opencode binary', () => {
@@ -223,7 +223,7 @@ test(
       process.env.APPDATA = join(tempRoot, 'roaming');
       process.env.LOCALAPPDATA = join(tempRoot, 'local');
       invalidateCliCommand('codex');
-      const result = resolveCliCommand('codex');
+      const result = resolveCliCommand('codex', { skipPathProbe: true });
       assert.equal(result, fakeCodex, 'should find official Windows Codex native desktop app binary path');
     } finally {
       invalidateCliCommand('codex');
@@ -557,3 +557,8 @@ test(
     }
   },
 );
+
+test('resolveCliCommand handles an absolute executable path containing spaces', () => {
+  invalidateCliCommand(process.execPath);
+  assert.equal(resolveCliCommand(process.execPath), process.execPath);
+});

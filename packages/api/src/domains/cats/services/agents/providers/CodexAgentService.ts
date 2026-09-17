@@ -1736,7 +1736,7 @@ export class CodexAgentService implements AgentService {
       ? [...COLLECTIVE_CODEX_POLICY_ARGS]
       : readOnly
         ? ['--ignore-user-config', '--config', 'mcp_servers={}', '--config', 'apps._default.enabled=false']
-        : [];
+        : ['--ignore-user-config'];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
