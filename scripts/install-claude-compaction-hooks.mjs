@@ -69,7 +69,17 @@ export function installClaudeCompactionHooks({ sourceRoot, projectRoot, apply = 
   return { applied: apply, settingsPath, hookPath: destination, hooks: settings.hooks };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isDirectExecution() {
+  try {
+    return (
+      !!process.argv[1] && realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) {
   try {
     const args = process.argv.slice(2);
     const value = (name) => {

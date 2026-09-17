@@ -209,3 +209,24 @@ test('real hook process authenticates seal and injects only API-selected cold co
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('repair CLI executes through the desktop scripts junction', async () => {
+  const alias = join(scratch, 'scripts-alias');
+  symlinkSync(join(root, 'scripts'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    const projectRoot = join(scratch, 'junction-cli-project');
+    const result = await run(join(alias, 'install-claude-compaction-hooks.mjs'), [
+      '--source-root',
+      root,
+      '--project-root',
+      projectRoot,
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    const preview = JSON.parse(result.stdout);
+    assert.equal(preview.applied, false);
+    assert.equal(preview.settingsPath, join(projectRoot, '.claude', 'settings.json'));
+  } finally {
+    if (process.platform === 'win32') rmdirSync(alias);
+    else rmSync(alias);
+  }
+});
