@@ -5,6 +5,9 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify from 'fastify';
 import { configStore } from '../dist/config/ConfigStore.js';
 import { configRoutes } from '../dist/routes/config.js';
@@ -19,6 +22,9 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
 
   async function setup(routeOptions = {}, options = {}) {
     app = Fastify();
+    // PATCH persists to the config-root .env — always isolate it to a temp
+    // file so tests never write through to the repo's .env.
+    const envFilePath = routeOptions.envFilePath ?? join(mkdtempSync(join(tmpdir(), 'cc-hotreload-')), '.env');
     const warnSink = Array.isArray(options.warnSink) ? options.warnSink : null;
     if (warnSink) {
       app.addHook('onRequest', (request, _reply, done) => {
@@ -30,7 +36,7 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
         done();
       });
     }
-    await app.register(configRoutes, routeOptions);
+    await app.register(configRoutes, { envFilePath, ...routeOptions });
     await app.ready();
     return app;
   }
@@ -184,5 +190,21 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     for (const key of keys) {
       assert.ok(configStore.getSnapshotPath(key), `missing snapshot path for ${key}`);
     }
+  });
+
+  it('persists the patch to .env so it survives restart', async () => {
+    const envFilePath = join(mkdtempSync(join(tmpdir(), 'cc-persist-')), '.env');
+    const { readFileSync } = await import('node:fs');
+    const app = await setup({ envFilePath });
+
+    const res = await patchConfig({ key: 'ui.bubble.cliOutput', value: 'expanded' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().persisted, true);
+
+    const envContent = readFileSync(envFilePath, 'utf8');
+    assert.ok(
+      envContent.includes('UI_BUBBLE_CLI_OUTPUT_DEFAULT=expanded'),
+      `expected persisted key, got: ${envContent}`,
+    );
   });
 });

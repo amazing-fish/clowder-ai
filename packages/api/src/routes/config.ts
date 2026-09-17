@@ -173,12 +173,30 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
     const before = collectConfigSnapshot();
     const oldValue = getSnapshotValue(before, parsed.data.key);
+    const normalized = String(parsed.data.value).trim();
+    let persisted = false;
     try {
-      configStore.set(parsed.data.key, parsed.data.value);
+      configStore.set(parsed.data.key, normalized);
     } catch (err) {
       reply.status(400);
       return { error: (err as Error).message };
     }
+
+    // Persist to the config-root .env so the change survives restart — the
+    // boot loader (project-env-loader) reapplies it next start. Best-effort:
+    // a write failure only means the hot update stays process-local.
+    const envKey = configStore.getEnvKey(parsed.data.key);
+    if (envKey) {
+      try {
+        const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
+        const next = applyEnvUpdatesToFile(current, new Map([[envKey, normalized]]));
+        writeFileSync(envFilePath, next, 'utf8');
+        persisted = true;
+      } catch (err) {
+        request.log.warn({ err, key: parsed.data.key, envFilePath }, 'config patch persistence failed');
+      }
+    }
+
     const after = collectConfigSnapshot();
     const newValue = getSnapshotValue(after, parsed.data.key);
     const riskLevel = configStore.getRiskLevel(parsed.data.key) ?? 'standard';
@@ -209,7 +227,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       request.log.warn({ err, key: parsed.data.key }, 'config audit append failed');
     }
 
-    return { config: after };
+    return { config: after, persisted };
   });
 
   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {
