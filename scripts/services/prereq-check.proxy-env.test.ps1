@@ -65,9 +65,9 @@ exit /b 0
     Invoke-ModelDownloadWithRetry -VenvPython $fakePython -ModelId "dummy/model" -Loader "snapshot"
 
     $captured = Get-Content -LiteralPath $capture
-    foreach ($line in @("HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=")) {
+    foreach ($line in @("HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "ALL_PROXY=http://127.0.0.1:9")) {
         if ($captured -notcontains $line) {
-            throw "Expected child process proxy env to be cleared; missing '$line'. Captured: $($captured -join '; ')"
+            throw "Expected child process proxy env to survive a direct config probe; missing '$line'. Captured: $($captured -join '; ')"
         }
     }
     foreach ($line in @("HF_HUB_DISABLE_SYMLINKS=1", "HF_HUB_DISABLE_SYMLINKS_WARNING=1")) {
@@ -81,7 +81,7 @@ exit /b 0
 
     try {
         $mode = Test-SourceMode `
-            -Url "https://127.0.0.1:1/" `
+            -Url "not-an-absolute-url" `
             -TimeoutSec 1 `
             -CandidateProxy "http://http=127.0.0.1:7897;https=127.0.0.1:7897" `
             -Method "GET"

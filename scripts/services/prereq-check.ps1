@@ -392,33 +392,11 @@ sys.exit(1)
         default { throw "Invoke-ModelDownloadWithRetry: unknown loader '$Loader'" }
     }
 
-    $proxyVarNames = if ($env:OS -eq "Windows_NT") {
-        @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
-    } else {
-        @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy")
-    }
-    $savedProxyEnv = @{}
-    $clearProxyForDownload = ($script:CatCafeHfDownloadTransportMode -eq "direct")
-    $exitCode = $null
-    try {
-        if ($clearProxyForDownload) {
-            # HuggingFace artifacts can redirect to CDN/CAS hosts that are
-            # not covered by NO_PROXY. When Assert-Network proved artifact
-            # downloads work direct, keep this Python child direct-only.
-            foreach ($name in $proxyVarNames) {
-                $savedProxyEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-                [Environment]::SetEnvironmentVariable($name, $null, "Process")
-            }
-        }
-        & $VenvPython -c $script $ModelId
-        $exitCode = $LASTEXITCODE
-    } finally {
-        if ($clearProxyForDownload) {
-            foreach ($name in $proxyVarNames) {
-                [Environment]::SetEnvironmentVariable($name, $savedProxyEnv[$name], "Process")
-            }
-        }
-    }
+    # A config.json probe does not prove that weights on CDN/CAS or a
+    # loader's alternate host can bypass the proxy. Preserve the caller's
+    # proxy environment; Assert-Network scopes direct hosts through NO_PROXY.
+    & $VenvPython -c $script $ModelId
+    $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) { throw "Failed to download model: $ModelId" }
 }
 
