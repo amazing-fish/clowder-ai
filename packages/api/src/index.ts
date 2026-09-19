@@ -240,7 +240,7 @@ import { createRoutingContextRuntime } from './domains/routing-context/index.js'
 import { createRuntimeInteractionRuntime } from './domains/runtime-interaction/runtime-interaction-composition.js';
 import { appendServiceLog } from './domains/services/service-lifecycle.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
-import { FileTasteRepository } from './domains/taste/services/TasteRepository.js';
+import { FileTasteRepository, resolveTasteGitRoot } from './domains/taste/services/TasteRepository.js';
 import { createVignetteWriter } from './domains/taste/services/writeVignette.js';
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
@@ -880,7 +880,7 @@ async function main(): Promise<void> {
   // F221 Phase B: taste proposal store (InMemory now; Redis in Task 3)
   const tasteProposalStore = createTasteProposalStore(redis);
   const tasteApprovalLock = new SessionMutex();
-  const tasteRepository = new FileTasteRepository(findMonorepoRoot(process.cwd()));
+  const tasteRepository = new FileTasteRepository(resolveTasteGitRoot(findMonorepoRoot(process.cwd())));
 
   // F235: Community issue draft store + publisher for "Publish to Community" flow
   const communityIssueDraftStore = createCommunityIssueDraftStore(redis);
