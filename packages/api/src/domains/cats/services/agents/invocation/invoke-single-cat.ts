@@ -3123,6 +3123,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = safeModel;
       const apiType = deriveOpenCodeApiType(effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      // clowder#1481: the research-cat context blow-up. OpenCode resolves a
+      // model's limit as `config ?? catalog ?? 0`, and its runtime disables
+      // auto-compaction outright at `limit.context === 0`
+      // (SessionCompaction.isOverflow returns false) — which is exactly what an
+      // unresolvable model gets. The tool loop then grows its prompt until the
+      // provider rejects it (`context_window_exceeded`); the session was never
+      // compressed because the runtime never knew the window.
+      //
+      // We already resolved that window for this invocation, so hand it to the
+      // runtime — but ONLY when `opencode models` does not list the model id the
+      // config actually writes, so a catalog-backed model keeps its authoritative
+      // context AND output limits. `safeModel` is that exact id: when the member's
+      // provider name collides with an OpenCode builtin it is remapped
+      // (`openai/...` → `openai-compat/...`), and the builtin's catalog entry no
+      // longer applies — so the remapped id is correctly treated as catalog-less.
+      // The config template pairs it with OpenCode's own OUTPUT_TOKEN_MAX, so the
+      // request output cap is unchanged either way.
+      const resolvedWindowTokens = invocationCapacitySnapshot?.capacity.windowTokens ?? 0;
+      const defaultModelContextWindow =
+        isApiKey && !getOpenCodeKnownModels().has(safeModel) && resolvedWindowTokens > 0
+          ? resolvedWindowTokens
+          : undefined;
       const runtimeConfigOptions = {
         providerName: effectiveProviderName,
         models: rawModels,
@@ -3131,6 +3153,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         omitProviderAuth: !isApiKey,
+        ...(defaultModelContextWindow != null ? { defaultModelContextWindow } : {}),
         mcpServerPath,
         ...(openCodeAllowedWorkspaceDirs ? { allowedWorkspaceDirs: openCodeAllowedWorkspaceDirs } : {}),
         // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.

@@ -8851,6 +8851,102 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(seenRuntimeConfig?.provider?.anthropic?.options, 'provider options must survive');
   });
 
+  it('clowder#1481: catalog-less OpenCode model receives limit{context,output} so the runtime can compact', async () => {
+    // Root cause of the research-cat "not compressed" incident: OpenCode resolves
+    // a model's limit as `config ?? catalog ?? 0`, and its runtime turns
+    // auto-compaction OFF at `limit.context === 0`
+    // (SessionCompaction.isOverflow returns false). A model absent from
+    // `opencode models` therefore never compacts, so its tool loop grows the
+    // prompt until the provider rejects it with `context_window_exceeded`.
+    // Supplying the window we already resolved revives compaction; the template
+    // pairs it with OpenCode's own OUTPUT_TOKEN_MAX (32000) so the request's
+    // output cap is unchanged.
+    const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+    mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'clowder-1481-limit-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const customProfile = await createProviderProfile(root, {
+      provider: 'atria',
+      name: 'atria-preview',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://atria.example/v1',
+      apiKey: 'sk-atria-key',
+      models: ['atria/Atria-Dawn-Preview'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-1481-limit-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: customProfile.id,
+      defaultModel: 'atria/Atria-Dawn-Preview',
+      contextWindow: 262_144,
+    });
+
+    const optionsSeen = [];
+    let seenRuntimeConfig;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        assert.ok(configPath, 'catalog-less model must still receive an invocation-scoped runtime config');
+        seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    const previousEnvMcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH;
+    try {
+      process.chdir(apiDir);
+      delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test clowder#1481 limit',
+          userId: 'user-clowder-1481',
+          threadId: 'thread-clowder-1481',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousEnvMcpPath === undefined) delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      else process.env.CAT_CAFE_MCP_SERVER_PATH = previousEnvMcpPath;
+      mod._resetOpenCodeKnownModels(null);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.ok(callbackEnv.OPENCODE_CONFIG);
+    const catalogLessEntry = seenRuntimeConfig?.provider?.atria?.models?.['Atria-Dawn-Preview'];
+    assert.ok(catalogLessEntry, 'the catalog-less default model must be registered');
+    assert.deepEqual(
+      catalogLessEntry.limit,
+      { context: 262_144, output: 32_000 },
+      'OpenCode needs limit{context,output}: limit.context === 0 disables auto-compaction entirely',
+    );
+  });
+
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {
     // Regression (砚砚 review): defaultModel="z-ai/glm-4.7" + provider="openrouter"
     // parseOpenCodeModel parses "z-ai" as providerName, but the real provider is "openrouter".
