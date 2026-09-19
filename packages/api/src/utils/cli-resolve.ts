@@ -4,9 +4,9 @@
  * when the command is not in the Node.js process's PATH.
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
-import { resolve, win32 } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { isAbsolute, resolve, win32 } from 'node:path';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -111,6 +111,17 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     resolvedCache.delete(command);
   }
 
+  // Absolute executable paths are already resolved. In particular, Windows
+  // `where` interprets a drive-letter path as its path:pattern syntax.
+  if (isAbsolute(command)) {
+    try {
+      if (!statSync(command).isFile()) return null;
+      resolvedCache.set(command, command);
+      return command;
+    } catch {
+      return null;
+    }
+  }
   // #1173: For the bare `kimi` command, probe the official Kimi Code layout
   // before PATH. The official installer lays down `~/.kimi-code/bin/kimi`,
   // while legacy `kimi-cli` users may still have a bare `kimi` on PATH that
@@ -133,8 +144,8 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
   // does its own `command -v`; repeating `which` is redundant + slower).
   if (!opts?.skipPathProbe) {
     try {
-      const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;
-      const result = execSync(which, { timeout: 5000, encoding: 'utf-8' }).trim();
+      const locator = IS_WINDOWS ? 'where.exe' : 'which';
+      const result = execFileSync(locator, [command], { timeout: 5000, encoding: 'utf-8' }).trim();
       if (result) {
         const lines = result
           .split('\n')
@@ -161,6 +172,9 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     if (appData) winDirs.push(resolve(appData, 'npm'));
     if (localAppData) winDirs.push(resolve(localAppData, 'npm'));
     if (command === 'agy' && localAppData) winDirs.push(resolve(localAppData, 'agy', 'bin'));
+    // Codex's native Windows desktop app (OpenAI Codex installer) puts codex.exe
+    // under %LOCALAPPDATA%\OpenAI\Codex\bin, which is never added to PATH.
+    if (command === 'codex' && localAppData) winDirs.push(resolve(localAppData, 'OpenAI', 'Codex', 'bin'));
     for (const dir of winDirs) {
       // Prefer .cmd shim (more reliable for resolveWindowsShimSpawn)
       const cmdCandidate = resolve(dir, `${command}.cmd`);
