@@ -23,10 +23,12 @@
  * >= 32000 collapses to the very fallback OpenCode already uses when no limit
  * exists: supplying it cannot change the output cap, it only revives compaction.
  *
- * Callers MUST pass a window only for model ids `opencode models` does not list.
- * Pinning a catalog-backed model would override its authoritative — sometimes
- * smaller — catalog output limit, which is exactly why #1208 stopped emitting
- * limits for those.
+ * Callers MUST pass a window only for model ids `opencode models` does not list,
+ * AND only when that listing actually answered. An empty result from a missing,
+ * failed, or timed-out probe is "unknown", not "catalog-less": pinning a
+ * catalog-backed model would override its authoritative — sometimes smaller —
+ * catalog output limit, which is exactly why #1208 stopped emitting limits for
+ * those.
  */
 
 export const OPENCODE_OUTPUT_TOKEN_MAX = 32_000;

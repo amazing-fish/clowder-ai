@@ -8947,6 +8947,98 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
+  it('clowder#1481: an unresolved `opencode models` probe must emit no limit (fail closed)', async () => {
+    // If the catalog probe never answered (CLI unresolvable, or the 5s
+    // `opencode models` call failed/timed out under load), the empty set means
+    // "unknown", not "catalog-less". Emitting a limit there would pin output to
+    // OUTPUT_TOKEN_MAX and override a catalog-backed model's smaller authoritative
+    // output cap — worse than the status quo — so the emission must fail closed.
+    const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+    mod._resetOpenCodeKnownModels(new Set(), false);
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'clowder-1481-unresolved-catalog-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const anthropicProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'claude-api-unresolved-catalog',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-ant-unresolved-catalog',
+      models: ['claude-opus-4-6'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-1481-unresolved-catalog-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: anthropicProfile.id,
+      defaultModel: 'anthropic/claude-opus-4-6',
+      contextWindow: 256_000,
+    });
+
+    const optionsSeen = [];
+    let seenRuntimeConfig;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        assert.ok(configPath, 'an unresolved catalog still yields an invocation-scoped runtime config');
+        seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    const previousEnvMcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH;
+    try {
+      process.chdir(apiDir);
+      delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test clowder#1481 unresolved catalog',
+          userId: 'user-clowder-1481-unresolved',
+          threadId: 'thread-clowder-1481-unresolved',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousEnvMcpPath === undefined) delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      else process.env.CAT_CAFE_MCP_SERVER_PATH = previousEnvMcpPath;
+      mod._resetOpenCodeKnownModels(null);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.ok(callbackEnv.OPENCODE_CONFIG);
+    const entry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
+    assert.ok(entry, 'the default model must still be registered');
+    assert.equal(
+      entry.limit,
+      undefined,
+      'an unanswered catalog probe is not evidence that the model is catalog-less',
+    );
+  });
+
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {
     // Regression (砚砚 review): defaultModel="z-ai/glm-4.7" + provider="openrouter"
     // parseOpenCodeModel parses "z-ai" as providerName, but the real provider is "openrouter".
