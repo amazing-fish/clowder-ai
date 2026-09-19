@@ -80,7 +80,12 @@ export async function createPaneLease(
         onStdoutLine: creation.captureReceipt,
       }));
     } catch (error) {
-      if (options.signal?.aborted || !isMissingTmuxServer(error)) throw error;
+      // A racing client can report a plain command error instead of Node's
+      // AbortError; an aborted creation must always surface as an abort.
+      if (options.signal?.aborted) {
+        throw options.signal.reason ?? new DOMException('tmux pane creation aborted', 'AbortError');
+      }
+      if (!isMissingTmuxServer(error)) throw error;
       // The observed server disappeared; recreate with the same baseline and lease name.
       ({ stdout } = await exec(bin, ['-L', socket, ...fresh], {
         env: tmuxServerEnvironment(),
@@ -97,6 +102,14 @@ export async function createPaneLease(
     return lease;
   } finally {
     // Consume only original process receipts; never reacquire a current PID.
-    if (!succeeded && creation.finish(false) === 'empty') await creation.awaitUnclaimedExit();
+    // Cleanup only runs after a failure, so its errors must not mask the
+    // failure that triggered the rollback.
+    if (!succeeded) {
+      try {
+        if (creation.finish(false) === 'empty') await creation.awaitUnclaimedExit();
+      } catch {
+        // Best-effort rollback; the pending error already describes the failure.
+      }
+    }
   }
 }
