@@ -23,7 +23,7 @@ test('formatCliNotFoundError returns install hint for known CLI', () => {
 test('formatCliNotFoundError returns native installer hint for agy', () => {
   const msg = formatCliNotFoundError('agy');
   assert.match(msg, /agy CLI 未找到/);
-  assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
+  assert.ok(msg.includes(`https://antigravity.google/cli/install.${process.platform === 'win32' ? 'cmd' : 'sh'}`));
 });
 
 test('formatCliNotFoundError points opencode users at the npm package that installs the opencode binary', () => {
@@ -197,6 +197,36 @@ test(
       assert.equal(result, fakeAgy, 'should find official Windows AGY native binary path');
     } finally {
       invalidateCliCommand('agy');
+      if (originalAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = originalAppData;
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'resolveCliCommand finds codex in LOCALAPPDATA/OpenAI/Codex/bin on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (Codex native desktop app fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-codex-localappdata-'));
+    const codexDir = join(tempRoot, 'local', 'OpenAI', 'Codex', 'bin');
+    mkdirSync(codexDir, { recursive: true });
+
+    const fakeCodex = join(codexDir, 'codex.exe');
+    writeFileSync(fakeCodex, 'MZ', 'utf8');
+
+    const originalAppData = process.env.APPDATA;
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    try {
+      process.env.APPDATA = join(tempRoot, 'roaming');
+      process.env.LOCALAPPDATA = join(tempRoot, 'local');
+      invalidateCliCommand('codex');
+      const result = resolveCliCommand('codex', { skipPathProbe: true });
+      assert.equal(result, fakeCodex, 'should find official Windows Codex native desktop app binary path');
+    } finally {
+      invalidateCliCommand('codex');
       if (originalAppData === undefined) delete process.env.APPDATA;
       else process.env.APPDATA = originalAppData;
       if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
@@ -527,3 +557,8 @@ test(
     }
   },
 );
+
+test('resolveCliCommand handles an absolute executable path containing spaces', () => {
+  invalidateCliCommand(process.execPath);
+  assert.equal(resolveCliCommand(process.execPath), process.execPath);
+});
