@@ -22,6 +22,10 @@ import {
   writeOpenCodeInstructionsOnlyConfig,
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
+import {
+  OPENCODE_OUTPUT_TOKEN_MAX,
+  resolveOpenCodeModelLimit,
+} from '../dist/domains/cats/services/agents/providers/opencode-model-limits.js';
 
 describe('opencode config module boundaries', () => {
   test('keeps ACP spawn config in a dedicated module under the line budget', () => {
@@ -391,15 +395,21 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
   });
 });
 
-// ── OpenCode limit block: we emit none ─────────────────────────────────────
+// ── OpenCode limit block: emitted only where the catalog cannot supply it ───
 // #1208 began writing `limit: { context }` with no `output`. OpenCode requires
 // `output` whenever `limit` exists, so every affected cat died at config-parse.
-// Supplying a guessed `output` is not a fix either: OpenCode merges
-// `config ?? catalog ?? 0`, so our value would overwrite an authoritative,
-// sometimes smaller catalog output limit. With no authoritative per-carrier
-// output source at this layer, we emit neither field.
-describe('generateOpenCodeRuntimeConfig — no limit block', () => {
-  test('never writes a limit block, so the catalog stays authoritative', () => {
+// Supplying a guessed `output` for a CATALOG-BACKED model is not a fix either:
+// OpenCode merges `config ?? catalog ?? 0`, so our value would overwrite an
+// authoritative, sometimes smaller catalog output limit.
+//
+// clowder#1481: staying limit-free is ALSO not a fix for models the catalog
+// does not know, because OpenCode resolves those to `limit.context === 0` and
+// disables auto-compaction outright at that value. Callers therefore pass
+// `defaultModelContextWindow` only for models absent from `opencode models`;
+// the pair `{ context: <ours>, output: OUTPUT_TOKEN_MAX }` revives compaction
+// without touching the request's output cap.
+describe('generateOpenCodeRuntimeConfig — limit block only for catalog-less models', () => {
+  test('never writes a limit block without an authoritative window', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'zhipu',
       models: ['glm-5.2'],
@@ -445,6 +455,114 @@ describe('generateOpenCodeRuntimeConfig — no limit block', () => {
       const providerKey = Object.keys(config.provider)[0];
       assert.equal(config.provider[providerKey].models[model].limit, undefined, `${model} must stay limit-free`);
     }
+  });
+
+  test('clowder#1481: emits { context, output } for the default model when given a window', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'atria',
+      models: ['Atria-Dawn-Preview'],
+      defaultModel: 'Atria-Dawn-Preview',
+      hasBaseUrl: true,
+      defaultModelContextWindow: 262_144,
+    });
+
+    assert.deepEqual(config.provider.atria.models['Atria-Dawn-Preview'], {
+      name: 'Atria-Dawn-Preview',
+      limit: { context: 262_144, output: OPENCODE_OUTPUT_TOKEN_MAX },
+    });
+    // OpenCode derives the request cap as `Math.min(limit.output, 32000) || 32000`,
+    // so pairing its own OUTPUT_TOKEN_MAX with a context cannot change the output
+    // cap — it only revives SessionCompaction, which is dead while
+    // `model.limit.context === 0`.
+    assert.equal(OPENCODE_OUTPUT_TOKEN_MAX, 32_000);
+  });
+
+  test('clowder#1481: the limit lands on the default model only', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'atria',
+      models: ['Atria-Dawn-Preview', 'Atria-Dawn-Lite'],
+      defaultModel: 'Atria-Dawn-Preview',
+      hasBaseUrl: true,
+      defaultModelContextWindow: 200_000,
+    });
+
+    assert.deepEqual(config.provider.atria.models['Atria-Dawn-Preview'].limit, {
+      context: 200_000,
+      output: OPENCODE_OUTPUT_TOKEN_MAX,
+    });
+    assert.equal(config.provider.atria.models['Atria-Dawn-Lite'].limit, undefined);
+  });
+
+  test('clowder#1481: a provider-prefixed default model still gets its limit', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'atria',
+      models: ['atria/Atria-Dawn-Preview'],
+      defaultModel: 'atria/Atria-Dawn-Preview',
+      hasBaseUrl: true,
+      defaultModelContextWindow: 262_144,
+    });
+
+    assert.deepEqual(config.provider.atria.models['Atria-Dawn-Preview'], {
+      name: 'Atria-Dawn-Preview',
+      limit: { context: 262_144, output: OPENCODE_OUTPUT_TOKEN_MAX },
+    });
+  });
+
+  test('clowder#1481: a non-positive or non-finite window keeps the entry limit-free', () => {
+    for (const window of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: 'atria',
+        models: ['Atria-Dawn-Preview'],
+        defaultModel: 'Atria-Dawn-Preview',
+        hasBaseUrl: true,
+        defaultModelContextWindow: window,
+      });
+
+      assert.equal(
+        config.provider.atria.models['Atria-Dawn-Preview'].limit,
+        undefined,
+        `window ${String(window)} must not emit a limit`,
+      );
+    }
+  });
+
+  test('clowder#1481: model aliases and the limit coexist', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'atria',
+      models: ['Atria-Dawn-Preview'],
+      modelAliases: { 'Atria-Dawn-Preview': 'atria-upstream-id' },
+      defaultModel: 'Atria-Dawn-Preview',
+      hasBaseUrl: true,
+      defaultModelContextWindow: 262_144,
+    });
+
+    assert.deepEqual(config.provider.atria.models['Atria-Dawn-Preview'], {
+      id: 'atria-upstream-id',
+      name: 'Atria-Dawn-Preview',
+      limit: { context: 262_144, output: OPENCODE_OUTPUT_TOKEN_MAX },
+    });
+  });
+});
+
+describe('resolveOpenCodeModelLimit (clowder#1481)', () => {
+  test('pairs an authoritative context window with OpenCode OUTPUT_TOKEN_MAX', () => {
+    assert.deepEqual(resolveOpenCodeModelLimit(262_144), {
+      context: 262_144,
+      output: OPENCODE_OUTPUT_TOKEN_MAX,
+    });
+  });
+
+  test('never emits a limit OpenCode could not use', () => {
+    for (const window of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(resolveOpenCodeModelLimit(window), undefined, `window ${String(window)}`);
+    }
+  });
+
+  test('floors a fractional window instead of trusting a float', () => {
+    assert.deepEqual(resolveOpenCodeModelLimit(200_000.7), {
+      context: 200_000,
+      output: OPENCODE_OUTPUT_TOKEN_MAX,
+    });
   });
 });
 

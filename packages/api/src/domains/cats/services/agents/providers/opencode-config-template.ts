@@ -1,5 +1,6 @@
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
+import { type OpenCodeModelLimit, resolveOpenCodeModelLimit } from './opencode-model-limits.js';
 
 export {
   inferOpenCodeProviderFromModelName,
@@ -20,9 +21,15 @@ interface OpenCodeConfigOptions {
   enableOmoc?: boolean;
 }
 
+type OpenCodeProviderModelConfig = {
+  id?: string;
+  name: string;
+  limit?: OpenCodeModelLimit;
+};
+
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { id?: string; name: string }>;
+  models?: Record<string, OpenCodeProviderModelConfig>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -86,16 +93,9 @@ export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCode
 export const OC_API_KEY_ENV = 'CAT_CAFE_OC_API_KEY';
 export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
 
-/**
- * We deliberately emit no `limit` block at all.
- *
- * OpenCode requires `limit.output` whenever `limit` is present and resolves
- * explicit config before its catalog and built-in fallback. Pinning only our
- * invocation context window here therefore makes the config invalid; guessing
- * an output would instead overwrite authoritative catalog output limits. This layer has no
- * carrier-aware output authority, so it supplies neither field. Clowder AI still
- * retains the invocation window for context health and session handoff.
- */
+// `limit` is emitted only where OpenCode's catalog cannot supply it: callers pass
+// `defaultModelContextWindow` for model ids absent from `opencode models`, while a
+// catalog-backed model keeps its authoritative limits. See opencode-model-limits.ts.
 
 /**
  * OpenCode API type determines which AI SDK npm adapter to use.
@@ -157,6 +157,8 @@ export interface OpenCodeRuntimeConfigOptions {
   capabilitiesProjectRoot?: string;
   /** F249: User's project working directory for per-project MCP overrides. */
   workingDirectory?: string;
+  /** clowder#1481: context window for the DEFAULT model; see opencode-model-limits.ts. */
+  defaultModelContextWindow?: number;
   /**
    * When true, only generate MCP config — no custom provider entry.
    * Used for OAuth auth where OpenCode handles credentials natively;
@@ -230,12 +232,17 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     catId,
     capabilitiesProjectRoot,
     workingDirectory,
+    defaultModelContextWindow,
     mcpOnly,
   } = options;
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { id?: string; name: string }> = {};
+  // Only the default model carries a caller-supplied window.
+  const defaultModelKey = defaultModel ? stripOwnProviderPrefix(defaultModel, providerName) : undefined;
+  const defaultModelLimit = resolveOpenCodeModelLimit(defaultModelContextWindow);
+
+  const modelsMap: Record<string, OpenCodeProviderModelConfig> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
@@ -245,6 +252,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     modelsMap[modelName] = {
       ...(upstreamId ? { id: upstreamId } : {}),
       name: modelName,
+      ...(defaultModelLimit && modelName === defaultModelKey ? { limit: defaultModelLimit } : {}),
     };
   }
 
