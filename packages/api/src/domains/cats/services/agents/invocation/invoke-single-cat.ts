@@ -3166,10 +3166,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // "catalog-less". Emitting a limit there would override a catalog-backed
       // model's authoritative — often smaller — output cap.
       const defaultModelContextWindow =
-        isApiKey &&
-        isOpenCodeCatalogResolved() &&
-        !getOpenCodeKnownModels().has(safeModel) &&
-        resolvedWindowTokens > 0
+        isApiKey && isOpenCodeCatalogResolved() && !getOpenCodeKnownModels().has(safeModel) && resolvedWindowTokens > 0
           ? resolvedWindowTokens
           : undefined;
       const runtimeConfigOptions = {

@@ -9032,11 +9032,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(callbackEnv.OPENCODE_CONFIG);
     const entry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
     assert.ok(entry, 'the default model must still be registered');
-    assert.equal(
-      entry.limit,
-      undefined,
-      'an unanswered catalog probe is not evidence that the model is catalog-less',
-    );
+    assert.equal(entry.limit, undefined, 'an unanswered catalog probe is not evidence that the model is catalog-less');
   });
 
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {
