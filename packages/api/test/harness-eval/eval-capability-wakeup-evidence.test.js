@@ -320,21 +320,35 @@ describe('Capability Wakeup Evidence', () => {
   });
 
   it('treats explicit denied preview responses as misses even when HTTP status looks successful', () => {
+    // Anchor the fixture to one clock sample: the window end is derived from the later
+    // tool event, so a preview observation sampled independently could land past
+    // windowEndMs on a millisecond boundary and flip the trial to false_positive.
+    const base = Date.now();
     const trace = buildCapabilityTrace({
       sessionId: 'session-cap',
       threadId: 'thread-cap',
       catId: 'gpt52',
       worktreeId: 'test-wt',
       transcriptEvents: [
-        transcriptEvent(0, 'inv-web', {
-          type: 'tool_use',
-          toolName: 'Edit',
-          toolInput: { file_path: 'packages/web/src/App.tsx' },
-        }),
-        transcriptEvent(1, 'inv-preview', {
-          type: 'text',
-          content: '我试着开 preview 了，但被拒绝了。',
-        }),
+        transcriptEvent(
+          0,
+          'inv-web',
+          {
+            type: 'tool_use',
+            toolName: 'Edit',
+            toolInput: { file_path: 'packages/web/src/App.tsx' },
+          },
+          base,
+        ),
+        transcriptEvent(
+          1,
+          'inv-preview',
+          {
+            type: 'text',
+            content: '我试着开 preview 了，但被拒绝了。',
+          },
+          base,
+        ),
       ],
       toolEvents: [
         toolEvent({
@@ -349,7 +363,7 @@ describe('Capability Wakeup Evidence', () => {
           },
         }),
       ],
-      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: Date.now() }],
+      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: base }],
     });
 
     const trials = evaluateCapabilityWakeupTrace(trace, [

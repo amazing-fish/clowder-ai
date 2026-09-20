@@ -328,20 +328,31 @@ describe('Capability Wakeup Trace', () => {
   });
 
   it('treats matching live preview evidence inside the window as a real browser-preview opportunity', () => {
+    // A single transcript event leaves a zero-width invocation window [t, t], so the
+    // preview observation must share that exact instant (window bounds are inclusive).
+    // Pinning both to one clock sample keeps the boundary assertion deterministic: two
+    // independent Date.now() samples can straddle a millisecond boundary, pushing the
+    // observation past windowEndMs and flipping the trial to false_positive.
+    const base = Date.now();
     const trace = buildCapabilityTrace({
       sessionId: 'session-cap',
       threadId: 'thread-cap',
       catId: 'gpt52',
       worktreeId: 'test-wt',
       transcriptEvents: [
-        transcriptEvent(0, 'inv-web', {
-          type: 'tool_use',
-          toolName: 'Edit',
-          toolInput: { file_path: 'packages/web/src/App.tsx' },
-        }),
+        transcriptEvent(
+          0,
+          'inv-web',
+          {
+            type: 'tool_use',
+            toolName: 'Edit',
+            toolInput: { file_path: 'packages/web/src/App.tsx' },
+          },
+          base,
+        ),
       ],
       toolEvents: [],
-      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: Date.now() }],
+      previewAvailability: [{ worktreeId: 'test-wt', hasLivePort: true, observedAt: base }],
     });
 
     const trials = evaluateCapabilityWakeupTrace(trace, [

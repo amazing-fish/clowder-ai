@@ -1,7 +1,12 @@
-export function transcriptEvent(eventNo, invocationId, event) {
+// `timestamp` pins the whole fixture to one explicit clock sample; events keep their
+// relative order through the eventNo offset. Fixtures must never sample Date.now()
+// twice when the assertion depends on those samples being ordered — the capability
+// wakeup evidence window compares evidence timestamps against window bounds, and two
+// independent samples can straddle a millisecond boundary and flip the outcome.
+export function transcriptEvent(eventNo, invocationId, event, timestamp) {
   return {
     v: 1,
-    t: Date.now() + eventNo,
+    t: (timestamp ?? Date.now()) + eventNo,
     threadId: 'thread-cap',
     catId: 'gpt52',
     sessionId: 'session-cap',
