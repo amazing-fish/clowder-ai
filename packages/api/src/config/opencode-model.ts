@@ -21,7 +21,8 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
  * provider from the model name for opencode API-key accounts).
  */
 const CUSTOM_ENDPOINT_PROVIDER_PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
-  // Intern-AI Discovery API (research cat · Atria Dawn)
+  // Atria-Dawn-Preview (issue #1508): a public OpenAI-compatible endpoint
+  // whose catalog entry must also resolve bare in the Hub save path.
   [/^atria-dawn/, 'openai-responses'],
 ];
 

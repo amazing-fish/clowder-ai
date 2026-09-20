@@ -28,8 +28,8 @@ describe('getContextWindowFallback', () => {
     assert.equal(getContextWindowFallback('gemini-2.5-pro'), 1_000_000);
     assert.equal(getContextWindowFallback('gemini-3-pro'), 1_000_000);
     assert.equal(getContextWindowFallback('gemini-3.1-pro-preview'), 1_000_000);
-    // Intern-AI Discovery API (research cat · Atria Dawn)
-    assert.equal(getContextWindowFallback('Atria-Dawn-Preview'), 262_144);
+    // Atria-Dawn-Preview (issue #1508)
+    assert.equal(getContextWindowFallback('Atria-Dawn-Preview'), 256_000);
   });
 
   test('returns prefix match for versioned models', async () => {
@@ -61,10 +61,10 @@ describe('getContextWindowFallback', () => {
     assert.equal(getContextWindowFallback('zhipu/glm-5.2'), 1_000_000);
     assert.equal(getContextWindowFallback('zhipu/glm-5.2[1m]'), 1_000_000);
     assert.equal(getContextWindowFallback('google/gemini-2.5-pro'), 1_000_000);
-    // Real production form for the research cat: the opencode runtime config
-    // registers provider `openai-responses`, so OpenCodeAgentService reports
-    // `openai-responses/Atria-Dawn-Preview` as metadata.model.
-    assert.equal(getContextWindowFallback('openai-responses/Atria-Dawn-Preview'), 262_144);
+    // Production form for a custom-endpoint binding: the opencode runtime
+    // config registers provider `openai-responses`, so OpenCodeAgentService
+    // reports `openai-responses/Atria-Dawn-Preview` as metadata.model.
+    assert.equal(getContextWindowFallback('openai-responses/Atria-Dawn-Preview'), 256_000);
     // Prefix match after strip (versioned model behind provider prefix)
     assert.equal(getContextWindowFallback('anthropic/claude-opus-4-6-20260101'), 1_000_000);
     assert.equal(getContextWindowFallback('anthropic/claude-sonnet-4-6-20260101'), 1_000_000);

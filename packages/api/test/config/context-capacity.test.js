@@ -159,12 +159,12 @@ describe('context-capacity resolver', () => {
       assert.equal(result.windowTokens, 0);
     });
 
-    // Research cat (Atria Dawn) binding: opencode custom endpoint + a catalog
-    // entry. Regression guard for the failure mode where a model that HAS a
-    // first-party documented window stayed `unresolved` purely because nobody
-    // added it to the shared catalog — which collapses prompt assembly to the
-    // conservative 100K truncation guard.
-    it('OpenCode research binding resolves from the catalog instead of the 100K unresolved guard', () => {
+    // Custom endpoint + catalog entry (issue #1508). Regression guard for the
+    // failure mode where a model that HAS a first-party documented window
+    // stayed `unresolved` purely because nobody added it to the shared
+    // catalog — which collapses prompt assembly to the conservative 100K
+    // truncation guard.
+    it('OpenCode custom-endpoint binding resolves from the catalog instead of the 100K unresolved guard', () => {
       catRegistry.register(TEST_CAT_ID, makeCatConfig({ clientId: 'opencode' }));
       const result = mod.resolveContextCapacity({
         catId: TEST_CAT_ID,
@@ -173,16 +173,17 @@ describe('context-capacity resolver', () => {
         model: 'openai-responses/Atria-Dawn-Preview',
       });
       assert.equal(result.source, 'catalog');
-      assert.equal(result.windowTokens, 262_144);
+      assert.equal(result.windowTokens, 256_000);
       const reserve = mod.getMemberOutputReserve(TEST_CAT_ID);
-      assert.equal(result.inputCeilingTokens, 262_144 - reserve);
+      assert.equal(result.inputCeilingTokens, 256_000 - reserve);
       // The user-visible point: prompt assembly gets real model capacity
-      // (≈209K of history) instead of the 100K unresolved guard (≈85K).
-      assert.equal(mod.resolvePromptInputCeilingTokens(result), 262_144 - reserve);
-      assert.equal(mod.deriveHistoryContextTokenCeiling(262_144 - reserve), 209_222);
-      // Catalog capacity is NOT actionable on its own. opencode has no
-      // contextBinding(), so bindCatalogCapacityToCarrier cannot promote it —
-      // auto-seal stays governed by the separate carrier-binding gap.
+      // (≈204K of history) instead of the 100K unresolved guard (≈85K).
+      assert.equal(mod.resolvePromptInputCeilingTokens(result), 256_000 - reserve);
+      assert.equal(mod.deriveHistoryContextTokenCeiling(256_000 - reserve), 204_000);
+      // Acceptance contract: catalog capacity is NOT actionable on its own.
+      // opencode has no contextBinding(), so bindCatalogCapacityToCarrier
+      // cannot promote it — auto-seal stays off and remains governed by the
+      // separate carrier-binding gap.
       assert.equal(result.actionable, false);
     });
 

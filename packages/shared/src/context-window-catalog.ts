@@ -42,22 +42,35 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
   'gemini-2.5-flash': 1_000_000,
   'gemini-3-pro': 1_000_000,
   'gemini-3.1-pro-preview': 1_000_000,
-  // Intern-AI Discovery API (research cat · Atria Dawn)
-  // Source: first-party model metadata from GET {baseUrl}/models —
-  // input_modalities[].supported_inputs.max_context_length.value = 262144.
+  // Atria-Dawn-Preview — public API from Shanghai AI Laboratory, served by
+  // two first-party regions (issue #1508).
   //
-  // Scope of this entry is deliberately narrow. opencode never emits
-  // contextWindowSize for a custom endpoint, so without a catalog entry the
-  // binding stays `unresolved` and the API prompt ceiling collapses to its
-  // 100K unresolved truncation guard (~85K history) instead of the model's
-  // real window. This entry lifts that truncation ceiling only.
+  // Value 256_000: the model card lists "Context: 256K" and the official API
+  // docs' model table says "256K tokens", and every machine-readable client
+  // budget the vendor ships uses 256000 — Codex
+  // `context_window`/`max_context_window` and Kimi `max_context_size`, both
+  // documented as the model's real limit so client budgeting and compaction
+  // work. This table is the same kind of client-side prompt budget, so it
+  // follows the same number.
+  //   https://huggingface.co/internlm/Atria-Dawn-Preview
+  //   https://api.atria-asi.ai/docs
   //
-  // It does NOT restore auto-seal: catalog capacity stays `actionable: false`
-  // (only manual/reported sources are actionable in resolveContextCapacity),
-  // and opencode exposes no carrier contextBinding to promote it, so
-  // automatic lifecycle actions and auto-seal remain off. Closing that gap is
-  // a separate carrier-binding change, not part of this catalog entry.
-  'Atria-Dawn-Preview': 262_144,
+  // Known discrepancy: the China-region gateway declares a higher
+  // max_context_length of 262144 for this id (GET {baseUrl}/models on
+  // https://discovery-api.intern-ai.org.cn/v1, observed 2026-09-20T19:27Z),
+  // but the same entry also declares a 262144 output cap where the docs cap
+  // output at 65536 — it over-declares. Budgeting on the lower documented
+  // value costs ~2% of the window; budgeting on the higher one risks
+  // over-limit requests at the ceiling if the documented value is the real
+  // one.
+  //
+  // Scope: this entry lifts the prompt/history truncation ceiling only, so a
+  // model bound through a custom endpoint stops collapsing to the 100K
+  // unresolved guard. It does NOT enable auto-seal — catalog capacity stays
+  // `actionable: false` (only manual/reported sources are actionable in
+  // resolveContextCapacity) and opencode exposes no carrier contextBinding to
+  // promote it. That distinction is the acceptance contract.
+  'Atria-Dawn-Preview': 256_000,
 };
 
 /**
