@@ -14,15 +14,25 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
 }
 
 /**
- * Custom OpenAI-compatible endpoints carry their OpenCode provider type on the
- * account, not in the model id, so no vendor prefix can reveal it. These
- * families are mapped explicitly: without an entry a bare model id stays
- * unresolved, and the Hub save path rejects it (routes/cats.ts infers the
- * provider from the model name for opencode API-key accounts).
+ * Default OpenCode provider for a bare model id whose endpoint is chosen by
+ * the member. The member's own `provider` always wins (`resolveEffectiveOpenCodeModel`
+ * prefers it); this table only fills the gap when it is unset, where a
+ * custom-endpoint id has no vendor prefix to infer from and would otherwise
+ * stay unresolved. That gap is not cosmetic: the Hub save path (routes/cats.ts)
+ * and `resolveEffectiveOpenCodeModel` both resolve bare ids through this
+ * function, and the shared context-window catalog enumerates its keys through
+ * it too.
+ *
+ * Entries are product defaults, not model properties. The same model id can be
+ * served over several wire protocols, so an entry records which protocol the
+ * Hub should assume by default for a bare id — not which protocol the model
+ * "is".
  */
 const CUSTOM_ENDPOINT_PROVIDER_PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
-  // Atria-Dawn-Preview (issue #1508): a public OpenAI-compatible endpoint
-  // whose catalog entry must also resolve bare in the Hub save path.
+  // Atria-Dawn-Preview (issue #1508): the vendor serves this model over Chat
+  // Completions, Messages and Responses. `openai-responses` is the assumed
+  // default for a bare id, matching the vendor's Responses-based client
+  // examples; a member that picks another protocol sets `provider` explicitly.
   [/^atria-dawn/, 'openai-responses'],
 ];
 

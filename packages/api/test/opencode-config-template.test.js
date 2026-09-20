@@ -252,14 +252,22 @@ describe('resolveEffectiveOpenCodeModel', () => {
   });
 
   // Regression guard for the catalog invariant: every context-window catalog
-  // entry must also resolve bare. Custom-endpoint families have no vendor
-  // prefix to infer from, so they need an explicit mapping — otherwise adding
-  // the model to the catalog makes the Hub reject the model it advertises.
-  test('resolves a mapped custom-endpoint family bare', () => {
+  // entry must also resolve bare. A custom-endpoint id has no vendor prefix to
+  // infer from, so it needs an explicit default — otherwise adding the model to
+  // the catalog makes the Hub reject the model it advertises. The member's own
+  // `provider` still wins when it is set; this only covers the unset case.
+  test('resolves a bare custom-endpoint model to its default provider', () => {
     assert.equal(inferOpenCodeProviderFromModelName('Atria-Dawn-Preview'), 'openai-responses');
     assert.deepEqual(resolveEffectiveOpenCodeModel(undefined, 'Atria-Dawn-Preview'), {
       providerName: 'openai-responses',
       model: 'openai-responses/Atria-Dawn-Preview',
+    });
+    // The entry is a default, not a property of the model: the member's own
+    // provider wins when it is set (the vendor serves this id over several
+    // wire protocols).
+    assert.deepEqual(resolveEffectiveOpenCodeModel('anthropic', 'Atria-Dawn-Preview'), {
+      providerName: 'anthropic',
+      model: 'anthropic/Atria-Dawn-Preview',
     });
   });
 
