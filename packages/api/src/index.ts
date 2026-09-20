@@ -800,12 +800,13 @@ async function main(): Promise<void> {
   let ownsGlobalAgentKeySidecars = false;
   let agentKeySidecarRenewalLoop: { start(): void; stop(): Promise<void> } | null = null;
   try {
-    const { shouldProvisionAntigravityAgentKeySidecar } = await import(
+    const { getAntigravityAgentKeySidecarSkipReason } = await import(
       './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar-policy.js'
     );
-    ownsGlobalAgentKeySidecars = shouldProvisionAntigravityAgentKeySidecar({
+    const sidecarSkipReason = getAntigravityAgentKeySidecarSkipReason({
       backendKind: agentKeyRegistryBackendKind,
     });
+    ownsGlobalAgentKeySidecars = sidecarSkipReason === null;
     if (ownsGlobalAgentKeySidecars) {
       const { ensureAntigravityAgentKeySidecar } = await import(
         './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
@@ -814,9 +815,14 @@ async function main(): Promise<void> {
       app.log.info(
         `[api] Antigravity agent-key sidecar ready: ${sidecar.filePath} (${sidecar.catId}/${sidecar.userId})`,
       );
-    } else {
+    } else if (sidecarSkipReason === 'memory-backend') {
       app.log.warn(
         '[api] Antigravity agent-key sidecar skipped: memory AgentKeyRegistry cannot safely back global sidecar files; set CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR=1 only for local degraded development',
+      );
+    } else {
+      app.log.info(
+        { reason: sidecarSkipReason, backendKind: agentKeyRegistryBackendKind },
+        '[api] Antigravity agent-key sidecar skipped by process policy',
       );
     }
   } catch (err) {
