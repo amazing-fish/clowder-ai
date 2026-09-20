@@ -68,3 +68,15 @@ shared package); it does not replace installed dependencies. Strict readiness ty
 format checks and the bundled Node probes with both launcher spellings also pass.
 The API caches this module, so replacing the on-disk file requires an application restart
 before live-session acceptance; no session records are reset or rewritten by this repair.
+
+
+## PR #18：子目录工作目录回归
+
+桌面项目可从 monorepo 子目录启动 Claude，而 readiness 在仓库根检查 carrier。
+安装命令必须使用项目根限定的绝对脚本路径，不能让 `.claude/hooks` 相对于 Claude 的 cwd 解析。
+readiness 同时校验 Node 和项目内脚本的文件身份；旧相对命令需要通过显式 installer repair 升级，
+不会再被判为可用。修复器保留自定义命令，并支持受管命令的重复安装与 Node 路径更新。
+
+真实路由回归从带空格和中文路径的嵌套子目录执行 pre/post，验证认证 observation 与 cold packet。
+脚本路径中含 shell 展开字符（双引号、换行、`$`、反引号、`%`、`!`）时安装器会在写配置前明确拒绝，
+避免生成会被 shell 重新解释的命令；本次源码修改不会自动改写正在运行的安装版配置。

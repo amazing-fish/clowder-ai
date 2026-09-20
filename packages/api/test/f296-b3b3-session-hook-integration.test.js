@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -70,9 +70,11 @@ function printCapability() {
 }
 
 describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet', () => {
-  test('installed portable commands reach the real route and preserve one authenticated epoch', async () => {
+  test('installed portable commands work from a nested cwd and preserve one authenticated epoch', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'clowder hook command 测试-'));
     const app = Fastify();
+    const nestedCwd = join(projectRoot, 'packages', 'nested app');
+    mkdirSync(nestedCwd, { recursive: true });
     try {
       installClaudeCompactionHooks({
         sourceRoot: fileURLToPath(new URL('../../../', import.meta.url)),
@@ -109,7 +111,7 @@ describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet
         new Promise((resolve, reject) => {
           const child = spawn(command, {
             shell: true,
-            cwd: projectRoot,
+            cwd: nestedCwd,
             env: {
               ...process.env,
               PATH: '',

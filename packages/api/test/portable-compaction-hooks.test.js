@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -98,7 +107,8 @@ test('portable carrier identifies the same Node through filesystem aliases and r
     writeFileSync(settingsPath, JSON.stringify(settings));
     return isClaudeProjectHookCarrierReady(project);
   };
-  const commandFor = (executable) => `"${executable.replaceAll('\\', '/')}" ".claude/hooks/f24-compaction.mjs" pre`;
+  const hookPath = join(project, '.claude/hooks/f24-compaction.mjs').replaceAll('\\', '/');
+  const commandFor = (executable) => `"${executable.replaceAll('\\', '/')}" "${hookPath}" pre`;
   const alias = join(scratch, 'node alias');
   symlinkSync(dirname(process.execPath), alias, process.platform === 'win32' ? 'junction' : 'dir');
   try {
@@ -130,7 +140,8 @@ test('portable carrier identifies the same Node through filesystem aliases and r
     `${canonical} && echo extra`,
     canonical.replace(' pre', ' post'),
     canonical.replace('f24-compaction.mjs', 'different.mjs'),
-    canonical.replace('" ".claude', '" --eval "code" ".claude'),
+    canonical.replace(`" "${hookPath}`, `" --eval "code" "${hookPath}`),
+    canonical.replace(hookPath, '.claude/hooks/f24-compaction.mjs'),
   ]) {
     assert.equal(check(command), false, `must reject altered command: ${command}`);
   }
@@ -228,5 +239,50 @@ test('repair CLI executes through the desktop scripts junction', async () => {
   } finally {
     if (process.platform === 'win32') rmdirSync(alias);
     else rmSync(alias);
+  }
+});
+
+test('absolute managed hooks upgrade Node without replacing hooks for another project', async () => {
+  const project = join(scratch, 'absolute migration');
+  const installer = join(root, 'scripts/install-claude-compaction-hooks.mjs');
+  const args = ['--source-root', root, '--project-root', project, '--apply'];
+  assert.equal((await run(installer, args)).code, 0);
+  const settingsPath = join(project, '.claude/settings.json');
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  const expected = settings.hooks.PreCompact[0].hooks[0].command;
+  const destination = join(project, '.claude/hooks/f24-compaction.mjs').replaceAll('\\', '/');
+  assert.ok(expected.includes(`"${destination}"`), 'script must be qualified by the project root');
+  settings.hooks.PreCompact[0].hooks[0].command = `"C:/old runtime/node.exe" "${destination}" pre`;
+  const custom = `"${process.execPath.replaceAll('\\', '/')}" "${destination.replace('absolute migration', 'another project')}" pre`;
+  settings.hooks.PreCompact[0].hooks.push({ type: 'command', command: custom });
+  writeFileSync(settingsPath, JSON.stringify(settings));
+  assert.equal((await run(installer, args)).code, 0);
+  const repaired = readFileSync(settingsPath, 'utf8');
+  const commands = JSON.parse(repaired).hooks.PreCompact.flatMap((entry) => entry.hooks.map((hook) => hook.command));
+  assert.deepEqual(commands, [custom, expected]);
+  assert.equal((await run(installer, args)).code, 0);
+  assert.equal(readFileSync(settingsPath, 'utf8'), repaired);
+});
+
+test('readiness rejects a valid carrier belonging to a different project', async () => {
+  const installer = join(root, 'scripts/install-claude-compaction-hooks.mjs');
+  const projects = [join(scratch, 'project-one'), join(scratch, 'project-two')];
+  for (const project of projects) {
+    assert.equal((await run(installer, ['--source-root', root, '--project-root', project, '--apply'])).code, 0);
+    assert.equal(isClaudeProjectHookCarrierReady(project), true);
+  }
+  const otherSettings = readFileSync(join(projects[1], '.claude/settings.json'), 'utf8');
+  writeFileSync(join(projects[0], '.claude/settings.json'), otherSettings);
+  assert.equal(isClaudeProjectHookCarrierReady(projects[0]), false);
+});
+
+test('installer refuses shell-expanded project paths before writing settings', async () => {
+  const installer = join(root, 'scripts/install-claude-compaction-hooks.mjs');
+  for (const name of ['project-$HOME', 'project-%TEMP%', 'project-`whoami`', 'project-!VAR!']) {
+    const project = join(scratch, name);
+    const result = await run(installer, ['--source-root', root, '--project-root', project, '--apply']);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /unsupported shell expansion characters/);
+    assert.equal(existsSync(join(project, '.claude/settings.json')), false);
   }
 });

@@ -1,21 +1,33 @@
 #!/usr/bin/env node
 // Explicit installer/repair entry point. Preview by default; --apply writes settings.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function isManagedCommand(command, phase, legacy) {
+function isManagedCommand(command, phase, legacy, destination) {
   if (typeof command !== 'string') return false;
   const trimmed = command.trim();
   if (trimmed === legacy) return true;
   // The script/phase identify the managed hook across Node runtime upgrades.
-  const match = trimmed.match(
-    /^(?:"[^"\r\n]*[\\/]node(?:\.exe)?"|node) "\.claude\/hooks\/f24-compaction\.mjs" (pre|post)$/,
-  );
-  return match?.[1] === phase;
+  const match = trimmed.match(/^(?:"[^"\r\n]*[\\/]node(?:\.exe)?"|node) "([^"\r\n]+)" (pre|post)$/);
+  if (!match || match[2] !== phase) return false;
+  if (match[1] === '.claude/hooks/f24-compaction.mjs') return true;
+  if (!isAbsolute(match[1])) return false;
+  if (resolve(match[1]) === destination) return true;
+  try {
+    return realpathSync.native(match[1]) === realpathSync.native(destination);
+  } catch {
+    return false;
+  }
 }
 
 export function installClaudeCompactionHooks({ sourceRoot, projectRoot, apply = false }) {
+  projectRoot = resolve(projectRoot);
+  const destination = join(projectRoot, '.claude', 'hooks', 'f24-compaction.mjs');
+  // Literal double-quoted paths must not be interpreted as shell expansion.
+  if (/["\r\n$`%!]/.test(destination + process.execPath)) {
+    throw new Error('Hook paths contain unsupported shell expansion characters');
+  }
   const settingsPath = join(projectRoot, '.claude', 'settings.json');
   const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, 'utf8')) : {};
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('Invalid project settings');
@@ -41,19 +53,21 @@ export function installClaudeCompactionHooks({ sourceRoot, projectRoot, apply = 
       event === 'PreCompact'
         ? '"$CLAUDE_PROJECT_DIR"/.claude/hooks/f24-pre-compact.sh'
         : '"$CLAUDE_PROJECT_DIR"/.claude/hooks/f24-post-compact-bootstrap.sh';
-    const command = `"${process.execPath.replaceAll('\\', '/')}" ".claude/hooks/f24-compaction.mjs" ${phase}`;
+    const command = `"${process.execPath.replaceAll('\\', '/')}" "${destination.replaceAll('\\', '/')}" ${phase}`;
     // Replace only exact managed commands. Custom hooks keep their order/content.
     settings.hooks[event] = entries
       .map((entry) => {
         if (!Array.isArray(entry.hooks)) throw new Error(`Invalid ${event} hook entry`);
-        return { ...entry, hooks: entry.hooks.filter((hook) => !isManagedCommand(hook.command, phase, legacy)) };
+        return {
+          ...entry,
+          hooks: entry.hooks.filter((hook) => !isManagedCommand(hook.command, phase, legacy, destination)),
+        };
       })
       .filter((entry) => entry.hooks.length > 0);
     settings.hooks[event].push({ matcher, hooks: [{ type: 'command', command, timeout: 15 }] });
   }
   const source = join(sourceRoot, '.claude', 'hooks', 'f24-compaction.mjs');
   if (!existsSync(source)) throw new Error(`Missing packaged hook: ${source}`);
-  const destination = join(projectRoot, '.claude', 'hooks', 'f24-compaction.mjs');
   if (apply) {
     mkdirSync(dirname(destination), { recursive: true });
     if (!existsSync(destination) || realpathSync(source) !== realpathSync(destination))
