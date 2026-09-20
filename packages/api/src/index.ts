@@ -537,10 +537,11 @@ async function main(): Promise<void> {
       : new AgentKeyRegistry();
   app.log.info(`[api] AgentKeyRegistry initialized (${agentKeyRegistryBackendKind} backend)`);
   try {
-    const { shouldProvisionAntigravityAgentKeySidecar } = await import(
+    const { getAntigravityAgentKeySidecarSkipReason } = await import(
       './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar-policy.js'
     );
-    if (shouldProvisionAntigravityAgentKeySidecar({ backendKind: agentKeyRegistryBackendKind })) {
+    const sidecarSkipReason = getAntigravityAgentKeySidecarSkipReason({ backendKind: agentKeyRegistryBackendKind });
+    if (sidecarSkipReason === null) {
       const { ensureAntigravityAgentKeySidecar } = await import(
         './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
       );
@@ -548,9 +549,14 @@ async function main(): Promise<void> {
       app.log.info(
         `[api] Antigravity agent-key sidecar ready: ${sidecar.filePath} (${sidecar.catId}/${sidecar.userId})`,
       );
-    } else {
+    } else if (sidecarSkipReason === 'memory-backend') {
       app.log.warn(
         '[api] Antigravity agent-key sidecar skipped: memory AgentKeyRegistry cannot safely back global sidecar files; set CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR=1 only for local degraded development',
+      );
+    } else {
+      app.log.info(
+        { reason: sidecarSkipReason, backendKind: agentKeyRegistryBackendKind },
+        '[api] Antigravity agent-key sidecar skipped by process policy',
       );
     }
   } catch (err) {
@@ -4491,18 +4497,23 @@ async function main(): Promise<void> {
     ]);
 
     const trajIntervalMs = Number.parseInt(process.env.F233_FEAT_TRAJECTORY_COLLECTOR_INTERVAL_MS ?? '', 10);
-    const repoRoot = process.env.CAT_CAFE_REPO_ROOT || process.cwd();
-    const repoFullName = process.env.CAT_CAFE_REPO_FULL_NAME || 'zts212653/cat-cafe';
+    const repoRoot = process.env.CAT_CAFE_REPO_ROOT || findMonorepoRoot(process.cwd());
 
     const trajProjector = new FeatTrajectoryProjectorCls(featTrajectoryStore);
     const gitRunner = new RealGitRunner(repoRoot);
+    const repoFullName = process.env.CAT_CAFE_REPO_FULL_NAME || (await gitRunner.getGitHubRepo());
+    if (!repoFullName) {
+      app.log.warn(
+        '[api] Feat trajectory PR metadata disabled: origin is not a GitHub URL; set CAT_CAFE_REPO_FULL_NAME to enable it',
+      );
+    }
     // Cloud round 2 P1 fix: pass logger so gh subprocess failures (missing
     // binary / auth expired / rate limited) log a warn instead of silently
     // dropping branch snapshots. Default base = main/master (set via undefined
     // → constructor default).
-    const ghClient = new RealGhClient(repoFullName, undefined, undefined, {
-      warn: app.log.warn.bind(app.log),
-    });
+    const ghClient = repoFullName
+      ? new RealGhClient(repoFullName, undefined, undefined, { warn: app.log.warn.bind(app.log) })
+      : { findPrByBranch: async () => null };
     const featIndexLookup = new RealFeatIndexLookup(`${repoRoot}/docs/features`);
     // Thread search wraps IThreadStore.list() — owner threads only (cron context).
     // Thread.lastActiveAt 用作 lastMessageAt/lastActivityAt 近似 (Thread 没单独

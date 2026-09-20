@@ -27,6 +27,21 @@ export class RealGitRunner implements GitRunner {
     private readonly gitCmd: GitCmdRunner = defaultGitCmd,
   ) {}
 
+  /** Resolve the same origin used by branch collection instead of assuming an upstream repo. */
+  async getGitHubRepo(): Promise<string | null> {
+    let remote: string;
+    try {
+      remote = (await this.gitCmd(['remote', 'get-url', 'origin'], this.repoRoot)).trim();
+    } catch {
+      return null;
+    }
+    const match =
+      /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(
+        remote,
+      );
+    return match?.[1] ?? null;
+  }
+
   /**
    * `git fetch origin --prune` 拉最新 refs + objects 到本地. 砚砚 final review
    * P1 fix: production cron tick 前调一次, 保证 getCommitMeta 在 newly pushed

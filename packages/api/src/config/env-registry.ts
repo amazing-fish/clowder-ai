@@ -224,15 +224,16 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_REPO_ROOT',
-    defaultValue: '(进程 CWD)',
-    description: 'F233 Phase C feat trajectory collector 所读 cat-cafe 仓根目录（含 .git）。未设置时用 process.cwd()',
+    defaultValue: '(monorepo root)',
+    description:
+      'F233 Phase C feat trajectory collector 所读仓根目录（含 .git）。未设置时从进程 CWD 查找 monorepo 根目录',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_REPO_FULL_NAME',
-    defaultValue: 'zts212653/cat-cafe',
+    defaultValue: '(GitHub origin)',
     description: 'F233 Phase C feat trajectory collector 调 gh CLI 用的 owner/repo（GitHub PR 元数据查询）',
     category: 'server',
     sensitive: false,
