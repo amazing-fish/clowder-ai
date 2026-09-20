@@ -23,6 +23,14 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
 
+// Context-window catalog entries whose id carries no native vendor family, so
+// a bare id cannot select a transport/API adapter (issue #1508). They are
+// capacity facts only; the member's configured `provider` stays authoritative.
+// This list is deliberately explicit: a new catalog entry that cannot resolve
+// bare fails the catalog invariant below until it is declared here, which is
+// the decision point — never a model-name → provider mapping in product code.
+const PROVIDER_REQUIRED_CATALOG_IDS = ['Atria-Dawn-Preview'];
+
 describe('opencode config module boundaries', () => {
   test('keeps ACP spawn config in a dedicated module under the line budget', () => {
     const templateSource = readFileSync(
@@ -251,31 +259,44 @@ describe('resolveEffectiveOpenCodeModel', () => {
     assert.equal(resolveEffectiveOpenCodeModel(undefined, 'vendor-model'), null);
   });
 
-  // Regression guard for the catalog invariant: every context-window catalog
-  // entry must also resolve bare. A custom-endpoint id has no vendor prefix to
-  // infer from, so it needs an explicit default — otherwise adding the model to
-  // the catalog makes the Hub reject the model it advertises. The member's own
-  // `provider` still wins when it is set; this only covers the unset case.
-  test('resolves a bare custom-endpoint model to its default provider', () => {
-    assert.equal(inferOpenCodeProviderFromModelName('Atria-Dawn-Preview'), 'openai-responses');
-    assert.deepEqual(resolveEffectiveOpenCodeModel(undefined, 'Atria-Dawn-Preview'), {
-      providerName: 'openai-responses',
-      model: 'openai-responses/Atria-Dawn-Preview',
-    });
-    // The entry is a default, not a property of the model: the member's own
-    // provider wins when it is set (the vendor serves this id over several
-    // wire protocols).
-    assert.deepEqual(resolveEffectiveOpenCodeModel('anthropic', 'Atria-Dawn-Preview'), {
-      providerName: 'anthropic',
-      model: 'anthropic/Atria-Dawn-Preview',
-    });
+  // WRONG_LAYER guard (issue #1508): a context-window catalog entry is a
+  // CAPACITY fact, not a TRANSPORT fact. A custom-endpoint id has no vendor
+  // prefix, so a bare id must stay unresolved — the member's configured
+  // `provider` is the authority for the adapter, and the Hub save path keeps
+  // its "unknown model prefix" validation error instead of guessing one.
+  //
+  // Do NOT add a model-name → provider mapping so the catalog invariant below
+  // passes. Declare the id here instead; it documents that the model requires
+  // an explicit provider and keeps the invariant meaningful for every other
+  // entry. `Atria-Dawn-Preview` is served over Chat Completions, Messages and
+  // Responses, so no wire protocol follows from the model name.
+  test('a custom-endpoint catalog id does not select its own transport', () => {
+    for (const model of PROVIDER_REQUIRED_CATALOG_IDS) {
+      assert.equal(inferOpenCodeProviderFromModelName(model), undefined);
+      assert.equal(resolveEffectiveOpenCodeModel(undefined, model), null);
+      // The member's configured provider stays authoritative when it is set.
+      for (const provider of ['openai-responses', 'anthropic', 'openai']) {
+        assert.deepEqual(resolveEffectiveOpenCodeModel(provider, model), {
+          providerName: provider,
+          model: `${provider}/${model}`,
+        });
+      }
+    }
   });
 
-  test('resolves every bare model in the context-window catalog', () => {
-    const unresolved = Object.keys(CONTEXT_WINDOW_SIZES).filter(
+  test('resolves every bare model in the context-window catalog except provider-required ids', () => {
+    const catalogModels = Object.keys(CONTEXT_WINDOW_SIZES);
+    const unresolved = catalogModels
+      .filter((model) => !PROVIDER_REQUIRED_CATALOG_IDS.includes(model))
+      .filter((model) => resolveEffectiveOpenCodeModel(undefined, model) == null);
+    assert.deepEqual(unresolved, []);
+
+    // Exact-set assertion: adding a catalog entry that cannot resolve bare is a
+    // deliberate decision, not something this test silently tolerates.
+    const bareUnresolved = catalogModels.filter(
       (model) => resolveEffectiveOpenCodeModel(undefined, model) == null,
     );
-    assert.deepEqual(unresolved, []);
+    assert.deepEqual([...bareUnresolved].sort(), [...PROVIDER_REQUIRED_CATALOG_IDS].sort());
   });
 });
 
@@ -456,9 +477,12 @@ describe('generateOpenCodeRuntimeConfig — no limit block', () => {
 
   test('every context-window catalog entry still emits a limit-free entry', () => {
     for (const model of Object.keys(CONTEXT_WINDOW_SIZES)) {
+      // Provider-required ids have no inferred provider; the member supplies
+      // it. The assertion below is about the limit block, which is emitted per
+      // provider/model pair and does not depend on which adapter is chosen.
       const resolved = resolveEffectiveOpenCodeModel(undefined, model);
       const config = generateOpenCodeRuntimeConfig({
-        providerName: resolved.providerName,
+        providerName: resolved?.providerName ?? 'custom-endpoint',
         models: [model],
         hasBaseUrl: true,
       });

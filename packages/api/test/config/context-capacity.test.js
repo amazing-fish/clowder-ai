@@ -185,6 +185,22 @@ describe('context-capacity resolver', () => {
       // cannot promote it — auto-seal stays off and remains governed by the
       // separate carrier-binding gap.
       assert.equal(result.actionable, false);
+
+      // Capacity is provider-agnostic (issue #1508 WRONG_LAYER): the same
+      // lookup resolves the bare id and any other configured protocol, because
+      // `getContextWindowFallback` strips the provider prefix before matching.
+      // The catalog entry therefore never needs the Hub to infer a transport
+      // from the model name.
+      const bare = mod.resolveContextCapacity({ catId: TEST_CAT_ID, model: 'Atria-Dawn-Preview' });
+      assert.equal(bare.source, 'catalog');
+      assert.equal(bare.windowTokens, 256_000);
+      assert.equal(bare.actionable, false);
+      const chatCompletions = mod.resolveContextCapacity({
+        catId: TEST_CAT_ID,
+        model: 'openai/Atria-Dawn-Preview',
+      });
+      assert.equal(chatCompletions.source, 'catalog');
+      assert.equal(chatCompletions.windowTokens, 256_000);
     });
 
     it('manual value is authoritative even when the catalog has a different value', () => {

@@ -4,9 +4,16 @@
  * Static model → context window mapping shared between API and Web.
  *
  * API uses this as the last-resort fallback in Auto mode (after carrier
- * reports). Web uses it to preview draft compatibility: if a model has a
- * catalog entry, Auto mode WILL resolve — so the "needs Manual" warning
- * should not fire.
+ * reports). Web uses it to preview draft compatibility: for a model in a
+ * native vendor family, a catalog entry means Auto mode WILL resolve, so the
+ * "needs Manual" warning should not fire.
+ *
+ * An entry is a CAPACITY fact only — it never selects a transport. A custom
+ * endpoint id carries no vendor prefix, so a bare id still needs the member's
+ * configured provider (one model id can be served over several wire
+ * protocols; issue #1508). Lookups here are provider-agnostic:
+ * `getContextWindowFallback` strips any provider prefix before matching, so
+ * both `Atria-Dawn-Preview` and `openai-responses/Atria-Dawn-Preview` resolve.
  *
  * This module is pure static data with zero runtime dependencies.
  * Runtime-only helpers (carrier report correction, known-minimum floors)
@@ -70,6 +77,12 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
   // `actionable: false` (only manual/reported sources are actionable in
   // resolveContextCapacity) and opencode exposes no carrier contextBinding to
   // promote it. That distinction is the acceptance contract.
+  //
+  // Transport: this entry must not select an API adapter either. The id has no
+  // native vendor prefix, so `inferOpenCodeProviderFromModelName` stays
+  // `undefined` for a bare id and the member's configured `provider` decides
+  // between Chat Completions / Messages / Responses. The capacity lookup above
+  // still matches the id with or without a provider prefix.
   'Atria-Dawn-Preview': 256_000,
 };
 

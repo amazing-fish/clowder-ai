@@ -14,29 +14,17 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
 }
 
 /**
- * Default OpenCode provider for a bare model id whose endpoint is chosen by
- * the member. The member's own `provider` always wins (`resolveEffectiveOpenCodeModel`
- * prefers it); this table only fills the gap when it is unset, where a
- * custom-endpoint id has no vendor prefix to infer from and would otherwise
- * stay unresolved. That gap is not cosmetic: the Hub save path (routes/cats.ts)
- * and `resolveEffectiveOpenCodeModel` both resolve bare ids through this
- * function, and the shared context-window catalog enumerates its keys through
- * it too.
+ * Infer the native OpenCode provider for a recognized bare model family.
  *
- * Entries are product defaults, not model properties. The same model id can be
- * served over several wire protocols, so an entry records which protocol the
- * Hub should assume by default for a bare id — not which protocol the model
- * "is".
+ * Deliberately no custom-endpoint default (issue #1508, WRONG_LAYER): the same
+ * model id can be served over Chat Completions, Messages and Responses, so no
+ * wire protocol follows from a model name. The member's configured `provider`
+ * is the authority for the transport; a context-window catalog entry is a
+ * CAPACITY fact and must not pick an adapter. Unknown prefixes therefore stay
+ * unresolved and the Hub save path keeps its validation error instead of
+ * guessing one. The catalog-invariant test in
+ * `test/opencode-config-template.test.js` pins this contract.
  */
-const CUSTOM_ENDPOINT_PROVIDER_PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
-  // Atria-Dawn-Preview (issue #1508): the vendor serves this model over Chat
-  // Completions, Messages and Responses. `openai-responses` is the assumed
-  // default for a bare id, matching the vendor's Responses-based client
-  // examples; a member that picks another protocol sets `provider` explicitly.
-  [/^atria-dawn/, 'openai-responses'],
-];
-
-/** Infer the native OpenCode provider for a recognized bare model family. */
 export function inferOpenCodeProviderFromModelName(model: string): string | undefined {
   const normalized = model.trim().toLowerCase();
   if (/^(gpt-|o[134](?:$|-|p)|davinci|text-|chatgpt)/.test(normalized)) return 'openai';
@@ -47,7 +35,7 @@ export function inferOpenCodeProviderFromModelName(model: string): string | unde
   if (/^(glm|chatglm)/.test(normalized)) return 'zhipu';
   if (/^(qwen|tongyi)/.test(normalized)) return 'dashscope';
   if (/^minimax/.test(normalized)) return 'minimax';
-  return CUSTOM_ENDPOINT_PROVIDER_PREFIXES.find(([pattern]) => pattern.test(normalized))?.[1];
+  return undefined;
 }
 
 /** Resolve one canonical provider/model identity for routing, capacity, and spawn config. */
