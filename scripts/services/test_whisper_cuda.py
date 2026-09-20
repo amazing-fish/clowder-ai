@@ -6,7 +6,10 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from test_whisper_worker import _load_whisper_api
+if __package__:
+    from .test_whisper_worker import _load_whisper_api
+else:
+    from test_whisper_worker import _load_whisper_api
 
 
 class FasterWhisperInitializationTest(unittest.TestCase):
@@ -62,6 +65,31 @@ class FasterWhisperInitializationTest(unittest.TestCase):
         self.assertEqual(constructor.call_count, 2)
         self.assertFalse(self.api.model_loaded)
         self.assertIsNone(self.api._fw_model)
+
+    def test_broken_optional_torch_import_still_loads_cpu(self):
+        constructor = Mock(return_value=object())
+        original_import = __import__
+
+        def import_with_broken_torch(name, *args, **kwargs):
+            if name == "torch":
+                raise OSError("torch native library unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_with_broken_torch):
+            self.assertTrue(self.initialize(0, constructor))
+        constructor.assert_called_once_with(
+            "fixture-model", device="cpu", compute_type="int8"
+        )
+
+    def test_optional_torch_probe_failure_still_loads_cpu(self):
+        constructor = Mock(return_value=object())
+        torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=Mock(side_effect=RuntimeError("driver unavailable")))
+        )
+        self.assertTrue(self.initialize(0, constructor, torch))
+        constructor.assert_called_once_with(
+            "fixture-model", device="cpu", compute_type="int8"
+        )
 
     def test_torch_cuda_is_used_when_ctranslate2_reports_no_device(self):
         constructor = Mock(return_value=object())

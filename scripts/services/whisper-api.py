@@ -295,6 +295,8 @@ def _try_faster_whisper() -> bool:
                 cuda_available = torch.cuda.is_available()
             except ImportError:
                 pass
+            except Exception:
+                log.warning("Optional torch CUDA probe failed, using CPU", exc_info=True)
         if cuda_available:
             device = "cuda"
             compute_type = "float16"
