@@ -42,6 +42,14 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
   'gemini-2.5-flash': 1_000_000,
   'gemini-3-pro': 1_000_000,
   'gemini-3.1-pro-preview': 1_000_000,
+  // Intern-AI Discovery API (research cat · Atria Dawn)
+  // Source: first-party model metadata from GET {baseUrl}/models —
+  // input_modalities[].supported_inputs.max_context_length.value = 262144.
+  // Without this entry an opencode custom-endpoint binding stays
+  // `unresolved` (opencode never emits contextWindowSize, and the catalog
+  // misses), so the prompt ceiling collapses to the 100K unresolved guard
+  // and `actionable: false` disables auto-seal for the whole session.
+  'Atria-Dawn-Preview': 262_144,
 };
 
 /**
