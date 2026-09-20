@@ -656,6 +656,16 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CAT_CAFE_TASTE_GIT_ROOT',
+    defaultValue: '(未设置 → findMonorepoRoot(cwd))',
+    description:
+      'F221 Taste 的 git checkout 根（desktop/exe 注入）。只用于 lockKey / 公开 vignette 发布源，不是 canonical-main，也不是 CAT_CAFE_RUNTIME_ROOT / CAT_CAFE_WORKSPACE_ROOT',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_GLOBAL_CONFIG_ROOT',
     defaultValue: '(未设置 → homedir())',
     description: '全局配置根目录（accounts / credentials 查找路径的父目录，实际路径为 <ROOT>/.cat-cafe/）',
