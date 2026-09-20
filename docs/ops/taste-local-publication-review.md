@@ -1,5 +1,5 @@
 ---
-feature_ids: []
+feature_ids: [F221]
 topics: [taste, desktop, fork-contribution]
 doc_kind: note
 created: 2026-09-18
@@ -46,7 +46,7 @@ updated: 2026-09-20
 
 - 使用合成 Taste 夹具验证：公开远端、身份或授权无法确认时，在 materialize/add/commit/push 前拒绝；没有授权时零远端写入。
 - 确认只有获授权的私有家仓接收 `privacy: public` 内容；源码 fork、开源上游及 outbound sync 不包含 Taste payload 或私人证据。
-- 拒绝脏目标工作区，处理并发文件修改，不丢失用户内容。
+- 标准隔离 publisher 从新鲜私有家仓 origin/main 创建一次性工作区；源 checkout 的 dirty/ahead/behind/WIP 不作为拒绝条件，也不进入审批事务。只有未来另行批准且实际写入本地工作区的模式，才对被写入的工作区要求 clean，并处理并发文件修改、不丢失用户内容。
 - 覆盖 materialize、add、commit 各阶段失败、重复调用与不可判定结果。
 - 区分本地待发布、私有家仓发布成功和公开源码 PR 待审等不同状态；源码 PR 合入不代表 Taste 发布成功。
 - 源码 checkout 配置与安装目录构建目标分开，不再使用本机 `tsconfig.install-build.json` 的绝对路径覆盖安装版 dist。
