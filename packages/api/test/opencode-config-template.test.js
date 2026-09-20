@@ -293,9 +293,7 @@ describe('resolveEffectiveOpenCodeModel', () => {
 
     // Exact-set assertion: adding a catalog entry that cannot resolve bare is a
     // deliberate decision, not something this test silently tolerates.
-    const bareUnresolved = catalogModels.filter(
-      (model) => resolveEffectiveOpenCodeModel(undefined, model) == null,
-    );
+    const bareUnresolved = catalogModels.filter((model) => resolveEffectiveOpenCodeModel(undefined, model) == null);
     assert.deepEqual([...bareUnresolved].sort(), [...PROVIDER_REQUIRED_CATALOG_IDS].sort());
   });
 });
