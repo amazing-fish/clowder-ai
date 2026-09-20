@@ -45,10 +45,18 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
   // Intern-AI Discovery API (research cat · Atria Dawn)
   // Source: first-party model metadata from GET {baseUrl}/models —
   // input_modalities[].supported_inputs.max_context_length.value = 262144.
-  // Without this entry an opencode custom-endpoint binding stays
-  // `unresolved` (opencode never emits contextWindowSize, and the catalog
-  // misses), so the prompt ceiling collapses to the 100K unresolved guard
-  // and `actionable: false` disables auto-seal for the whole session.
+  //
+  // Scope of this entry is deliberately narrow. opencode never emits
+  // contextWindowSize for a custom endpoint, so without a catalog entry the
+  // binding stays `unresolved` and the API prompt ceiling collapses to its
+  // 100K unresolved truncation guard (~85K history) instead of the model's
+  // real window. This entry lifts that truncation ceiling only.
+  //
+  // It does NOT restore auto-seal: catalog capacity stays `actionable: false`
+  // (only manual/reported sources are actionable in resolveContextCapacity),
+  // and opencode exposes no carrier contextBinding to promote it, so
+  // automatic lifecycle actions and auto-seal remain off. Closing that gap is
+  // a separate carrier-binding change, not part of this catalog entry.
   'Atria-Dawn-Preview': 262_144,
 };
 
