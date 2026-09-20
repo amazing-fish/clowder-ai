@@ -13,6 +13,18 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
   };
 }
 
+/**
+ * Custom OpenAI-compatible endpoints carry their OpenCode provider type on the
+ * account, not in the model id, so no vendor prefix can reveal it. These
+ * families are mapped explicitly: without an entry a bare model id stays
+ * unresolved, and the Hub save path rejects it (routes/cats.ts infers the
+ * provider from the model name for opencode API-key accounts).
+ */
+const CUSTOM_ENDPOINT_PROVIDER_PREFIXES: ReadonlyArray<readonly [RegExp, string]> = [
+  // Intern-AI Discovery API (research cat · Atria Dawn)
+  [/^atria-dawn/, 'openai-responses'],
+];
+
 /** Infer the native OpenCode provider for a recognized bare model family. */
 export function inferOpenCodeProviderFromModelName(model: string): string | undefined {
   const normalized = model.trim().toLowerCase();
@@ -24,7 +36,7 @@ export function inferOpenCodeProviderFromModelName(model: string): string | unde
   if (/^(glm|chatglm)/.test(normalized)) return 'zhipu';
   if (/^(qwen|tongyi)/.test(normalized)) return 'dashscope';
   if (/^minimax/.test(normalized)) return 'minimax';
-  return undefined;
+  return CUSTOM_ENDPOINT_PROVIDER_PREFIXES.find(([pattern]) => pattern.test(normalized))?.[1];
 }
 
 /** Resolve one canonical provider/model identity for routing, capacity, and spawn config. */
