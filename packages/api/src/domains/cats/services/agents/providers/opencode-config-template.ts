@@ -264,6 +264,9 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const config: OpenCodeConfig = {
     $schema: 'https://opencode.ai/config.json',
     ...(configDefaultModel ? { model: configDefaultModel, small_model: configDefaultModel } : {}),
+    ...(apiType === 'openai-responses' && hasBaseUrl && !mcpOnly && !omitProviderAuth
+      ? { plugin: [new URL('./opencode-responses-compat-plugin.js', import.meta.url).href] }
+      : {}),
     provider: {
       [configName]: {
         npm: NPM_ADAPTER_FOR_API_TYPE[apiType] ?? NPM_ADAPTER_FOR_API_TYPE.openai,
