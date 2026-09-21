@@ -16,6 +16,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
+import { isFinalAcpToolStatus } from './acp-tool-state.js';
 import type { AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-event-xform');
@@ -87,11 +88,6 @@ export function flushAcpThinking(state: AcpSessionState, catId: CatId, metadata:
     metadata,
     timestamp: Date.now(),
   };
-}
-
-/** F197 KD-6: final判定仅认 status ∈ {completed, failed}. no-status content NOT final. */
-function isFinalStatus(status: unknown): status is 'completed' | 'failed' {
-  return status === 'completed' || status === 'failed';
 }
 
 /** Extract tool name from ACP event, tolerating field name variants across CLI versions. */
@@ -250,7 +246,7 @@ export function transformAcpEvent(
       // — Recall pairing model needs the pair to complete; content '' is the
       // canonical "no payload" marker. Pre-fix the missing-content branch
       // fell through to tool_use only and left the tool permanently pending.
-      if (isFinalStatus(status)) {
+      if (isFinalAcpToolStatus(status)) {
         const resultMsg: AgentMessage = {
           type: 'tool_result',
           catId,
@@ -281,7 +277,7 @@ export function transformAcpEvent(
       const toolName = resolveToolName(inner);
       const toolCallId = typeof inner.toolCallId === 'string' ? inner.toolCallId : undefined;
       const status = inner.status;
-      const final = isFinalStatus(status);
+      const final = isFinalAcpToolStatus(status);
       const alreadyHasToolUse = state && toolCallId ? state.emittedToolUseByCallId.has(toolCallId) : false;
       // F197 AC-A4 / KD-6: only status ∈ {completed, failed} is final. No-status
       // fallback removed — progress content is NOT promoted to result.
