@@ -92,6 +92,19 @@ the existing finalizer fallback instead of adding another transport path.
 
 ## Validation
 
+Fork delivery: the operator requires merging into `amazing-fish/clowder-ai`
+before any upstream submission, with operator approval for every upstream
+operation. The three reviewed patches were cherry-picked onto fork main
+`89deeeb25`; `git range-diff` reports all three patches unchanged. The fork's
+existing model-limit and terminal-answer changes are retained. Its 350-line
+template budget initially failed (352 lines); removing the obsolete writer
+extraction note restores the budget without changing executable code or tests.
+On this fork base, shared build and API TypeScript build passed, and the three
+focused suites plus the fork's terminal-answer suite passed **129/129**.
+The seven changed code/test files pass Biome after normalizing checkout CRLF.
+These fork checks supersede the original-base counts below for local delivery;
+the earlier live probes remain evidence for the unchanged compatibility code.
+
 - Red: the new focused tests produced four expected failures (missing plugin
   and two errors emitted instead of one).
 - Review delta red: five failures independently demonstrate both pure-mode

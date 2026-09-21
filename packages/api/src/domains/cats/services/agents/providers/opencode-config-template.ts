@@ -347,5 +347,3 @@ export function summarizeOpenCodeRuntimeConfigForDebug(
     ),
   };
 }
-// Writer functions (writeOpenCodeRuntimeConfig, writeOpenCodeInstructionsOnlyConfig)
-// extracted to opencode-config-writer.ts to stay under 350-line module budget.
