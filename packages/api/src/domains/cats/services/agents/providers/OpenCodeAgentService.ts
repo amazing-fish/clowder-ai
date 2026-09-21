@@ -174,9 +174,13 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
       : undefined;
 
   // These outcomes cannot recover by retrying the same configured invocation.
-  // Deliberately exclude 408/429/5xx: those are transient and OpenCode may
-  // legitimately recover without Clowder AI terminating the process.
+  // Honor OpenCode's explicit non-retryable APIError marker. Otherwise exclude
+  // 408/429/5xx: OpenCode may legitimately recover without us terminating it.
   return (
+    ((rawError as Record<string, unknown>).name === 'APIError' &&
+      typeof data === 'object' &&
+      data !== null &&
+      (data as Record<string, unknown>).isRetryable === false) ||
     reasonCode === 'model_not_found' ||
     reasonCode === 'auth_failed' ||
     reasonCode === 'invalid_config' ||
@@ -566,6 +570,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
                   ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
                 },
               });
+              // Schema rejections are carried on stdout. Preserve their structured
+              // HTTP cause instead of replacing it with an empty-stderr exit hint.
+              if (
+                !cliDiagnostics.reasonCode &&
+                (rawError?.data?.statusCode === 400 || rawError?.data?.statusCode === 422)
+              ) {
+                cliDiagnostics.publicSummary = `上游拒绝请求（HTTP ${rawError.data.statusCode}）`;
+                cliDiagnostics.publicHint = '请检查 CLI 与上游端点的请求格式及协议兼容性；重复发送相同请求无法修复。';
+              }
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
             terminateAfterYield = isPermanentOpenCodeProviderFailure(event, yieldMetadata.cliDiagnostics?.reasonCode);

@@ -673,6 +673,45 @@ describe('OpenCodeAgentService', () => {
     }
   });
 
+  test('surfaces non-retryable Responses schema rejection once without a generic exit retry', async () => {
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      model: 'openai-responses/Atria-Dawn-Preview',
+      autoApproveProbeFn: async () => ({ supported: true }),
+    });
+    const messages = await collect(
+      service.invoke('Test', {
+        invocationId: 'inv-schema-error',
+        spawnCliOverride: async function* () {
+          yield {
+            type: 'error',
+            error: {
+              name: 'APIError',
+              data: {
+                message: '240 validation errors:\nbody.input assistant message rejected',
+                statusCode: 400,
+                isRetryable: false,
+              },
+            },
+          };
+          yield {
+            __cliError: true,
+            exitCode: 1,
+            signal: null,
+            message: 'CLI 异常退出 (code: 1, signal: none)',
+            command: 'opencode',
+          };
+        },
+      }),
+    );
+    const errors = messages.filter((message) => message.type === 'error');
+    assert.equal(errors.length, 1, 'terminal exit must not replace the upstream error or trigger transient retry');
+    assert.match(errors[0].metadata.cliDiagnostics.publicSummary, /400/);
+    assert.match(errors[0].metadata.cliDiagnostics.publicHint, /协议|格式/);
+    assert.equal(errors[0].metadata.cliDiagnostics.debugRef.invocationId, 'inv-schema-error');
+    assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+  });
+
   test('does not terminate a CLI for a transient provider error', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
