@@ -59,6 +59,14 @@ The compatibility rule is endpoint-specific; a different regional endpoint is
 not assumed to share this behavior without evidence. `opencode --pure` disables
 external plugins and therefore also disables this compatibility hook.
 
+The fallback scanner flags five constructs in the plugin. They are boundary
+guards, not alternate transport paths: invalid URLs and non-JSON bodies pass
+unchanged; absent provider config means no provider to visit; the provider/URL
+predicate restricts scope; `options.fetch ?? globalThis.fetch` composes an
+existing fetch implementation or uses the platform default. Removing them
+would either throw on unrelated input or discard another plugin's fetch hook.
+Normalization belongs at this request boundary, not in persisted chat history.
+
 ## Validation
 
 - Red: the new focused tests produced four expected failures (missing plugin
