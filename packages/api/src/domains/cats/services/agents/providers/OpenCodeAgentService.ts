@@ -63,6 +63,7 @@ import {
   recoverOpenCodeSilentCompletion,
   SessionSingleFlight,
 } from './opencode-recovery.js';
+import { requiresDiscoveryResponsesPlugin } from './opencode-responses-compat-policy.js';
 
 const log = createModuleLogger('opencode-agent');
 
@@ -174,9 +175,13 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
       : undefined;
 
   // These outcomes cannot recover by retrying the same configured invocation.
-  // Deliberately exclude 408/429/5xx: those are transient and OpenCode may
-  // legitimately recover without Clowder AI terminating the process.
+  // Honor OpenCode's explicit non-retryable APIError marker. Otherwise exclude
+  // 408/429/5xx: OpenCode may legitimately recover without us terminating it.
   return (
+    ((rawError as Record<string, unknown>).name === 'APIError' &&
+      typeof data === 'object' &&
+      data !== null &&
+      (data as Record<string, unknown>).isRetryable === false) ||
     reasonCode === 'model_not_found' ||
     reasonCode === 'auth_failed' ||
     reasonCode === 'invalid_config' ||
@@ -319,6 +324,32 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     const envSummary = summarizeOpenCodeEnvForDebug(childEnv);
     const metadata: MessageMetadata = { provider: 'opencode', model: effectiveModel };
     let sessionInitEmitted = false;
+
+    // --pure is the read-only isolation boundary and disables all external plugins.
+    // Even a fresh turn can create assistant history during a tool round trip.
+    if (readOnly && requiresDiscoveryResponsesPlugin(effectiveModel, childEnv.CAT_CAFE_OC_BASE_URL)) {
+      const summary = '此端点的 Responses 只读调用需要兼容插件，与 CLI 的只读隔离模式不兼容。';
+      const cliDiagnostics = buildCliDiagnostics({
+        rawText: '',
+        debugRef: {
+          command: 'opencode',
+          exitCode: null,
+          signal: null,
+          ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+        },
+      });
+      cliDiagnostics.publicSummary = summary;
+      cliDiagnostics.publicHint = '请选择支持只读隔离的成员；本次未启动 CLI，也未修改原会话。';
+      yield {
+        type: 'error',
+        catId: this.catId,
+        error: summary,
+        metadata: { ...metadata, cliDiagnostics },
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      return;
+    }
 
     try {
       const opencodeCommand = resolveCliCommand('opencode');
@@ -551,7 +582,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               'OpenCode CLI returned error event',
             );
             const diagnosticText = [
-              rawError?.data?.message ?? rawError?.name,
+              // Validation details may quote arbitrary prompt text (quota, ENOENT,
+              // etc.). Only classify the error heading for request rejections.
+              rawError?.data?.statusCode === 400 || rawError?.data?.statusCode === 422
+                ? (rawError.data.message?.split(/\r?\n/, 1)[0] ?? rawError.name)
+                : (rawError?.data?.message ?? rawError?.name),
               rawError?.data?.statusCode ? `HTTP ${rawError.data.statusCode}` : undefined,
             ]
               .filter((value): value is string => Boolean(value))
@@ -566,6 +601,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
                   ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
                 },
               });
+              // Schema rejections are carried on stdout. Preserve their structured
+              // HTTP cause instead of replacing it with an empty-stderr exit hint.
+              if (
+                !cliDiagnostics.reasonCode &&
+                (rawError?.data?.statusCode === 400 || rawError?.data?.statusCode === 422)
+              ) {
+                cliDiagnostics.publicSummary = `上游拒绝请求（HTTP ${rawError.data.statusCode}）`;
+                cliDiagnostics.publicHint = '请检查 CLI 与上游端点的请求格式及协议兼容性；重复发送相同请求无法修复。';
+              }
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
             terminateAfterYield = isPermanentOpenCodeProviderFailure(event, yieldMetadata.cliDiagnostics?.reasonCode);
@@ -747,7 +791,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   }
 
   private async *runPostToolFinalizer(params: OpenCodePostToolFinalizerParams): AsyncIterable<AgentMessage> {
-    const boundaryFailure = this.getNoToolFinalizerBoundaryFailure();
+    const boundaryFailure = this.getNoToolFinalizerBoundaryFailure(params.effectiveModel, params.childEnv);
     if (boundaryFailure) {
       log.warn(
         { catId: this.catId, invocationId: params.options?.invocationId, reason: boundaryFailure },
@@ -975,9 +1019,12 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     };
   }
 
-  private getNoToolFinalizerBoundaryFailure(): string | null {
+  private getNoToolFinalizerBoundaryFailure(model: string, env: Record<string, string | null>): string | null {
     if (hasOpenCodeManagedConfig({ managedConfigPaths: this.opencodeManagedConfigPaths })) {
       return 'managed_config_present';
+    }
+    if (requiresDiscoveryResponsesPlugin(model, env.CAT_CAFE_OC_BASE_URL)) {
+      return 'responses_compat_requires_plugin';
     }
     return null;
   }
