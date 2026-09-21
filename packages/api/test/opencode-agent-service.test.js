@@ -1409,66 +1409,68 @@ describe('OpenCodeAgentService', () => {
     assert.match(String(textMsgs.at(-1)?.content), /managed_config_present/);
   });
 
-  test('Discovery Responses finalizer preserves pure isolation without spawning an incompatible continuation', async () => {
-    let calls = 0;
-    const service = new OpenCodeAgentService({
-      catId: 'opencode',
-      model: 'openai-responses/Atria-Dawn-Preview',
-      autoApproveProbeFn: async () => ({ supported: true }),
-      opencodeManagedConfigPaths: [],
-    });
-    const messages = await collect(
-      service.invoke('Read the fixture', {
-        callbackEnv: { CAT_CAFE_OC_BASE_URL: 'https://discovery-api.intern-ai.org.cn/v1' },
-        spawnCliOverride: async function* () {
-          calls++;
-          yield STEP_START;
-          if (calls === 1) {
-            yield { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Checking.' } };
-            yield {
-              ...TOOL_USE,
-              part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'private fixture' } },
-            };
-            yield STEP_FINISH_TOOL_CALLS;
-          } else {
-            yield TEXT_RESPONSE;
-            yield STEP_FINISH;
-          }
-        },
-      }),
-    );
-    assert.equal(calls, 1, 'pure finalizer must not bypass the compatibility plugin');
-    const final = messages.filter((m) => m.type === 'text').at(-1);
-    assert.equal(final.textMode, 'replace');
-    assert.match(final.content, /responses_compat_requires_plugin/);
-    assert.doesNotMatch(final.content, /private fixture/);
-    assert.equal(messages.filter((m) => m.type === 'done').length, 1);
-  });
-
-  test('Discovery Responses read-only calls fail explicitly before spawn, including a fresh tool-capable turn', async () => {
-    for (const sessionId of [undefined, 'ses_preserve_me']) {
+  for (const provider of ['openai-responses', 'OpenAI-Responses', 'OPENAI-RESPONSES']) {
+    test(`Discovery Responses finalizer preserves pure isolation for ${provider}`, async () => {
       let calls = 0;
-      const service = new OpenCodeAgentService({ catId: 'opencode', model: 'openai-responses/Atria-Dawn-Preview' });
+      const service = new OpenCodeAgentService({
+        catId: 'opencode',
+        model: `${provider}/Atria-Dawn-Preview`,
+        autoApproveProbeFn: async () => ({ supported: true }),
+        opencodeManagedConfigPaths: [],
+      });
       const messages = await collect(
-        service.invoke('Read only', {
-          sessionId,
-          invocationId: 'inv-pure-boundary',
-          toolExecutionPolicy: { mode: 'read_only' },
+        service.invoke('Read the fixture', {
           callbackEnv: { CAT_CAFE_OC_BASE_URL: 'https://discovery-api.intern-ai.org.cn/v1' },
           spawnCliOverride: async function* () {
             calls++;
             yield STEP_START;
-            yield STEP_FINISH;
+            if (calls === 1) {
+              yield { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Checking.' } };
+              yield {
+                ...TOOL_USE,
+                part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'private fixture' } },
+              };
+              yield STEP_FINISH_TOOL_CALLS;
+            } else {
+              yield TEXT_RESPONSE;
+              yield STEP_FINISH;
+            }
           },
         }),
       );
-      assert.equal(calls, 0);
-      const error = messages.find((m) => m.type === 'error');
-      assert.match(error.error, /兼容插件/);
-      assert.equal(error.metadata.cliDiagnostics.debugRef.invocationId, 'inv-pure-boundary');
+      assert.equal(calls, 1, 'pure finalizer must not bypass the compatibility plugin');
+      const final = messages.filter((m) => m.type === 'text').at(-1);
+      assert.equal(final.textMode, 'replace');
+      assert.match(final.content, /responses_compat_requires_plugin/);
+      assert.doesNotMatch(final.content, /private fixture/);
       assert.equal(messages.filter((m) => m.type === 'done').length, 1);
-    }
-  });
+    });
+
+    test(`Discovery Responses read-only calls fail before spawn for fresh and resumed ${provider}`, async () => {
+      for (const sessionId of [undefined, 'ses_preserve_me']) {
+        let calls = 0;
+        const service = new OpenCodeAgentService({ catId: 'opencode', model: `${provider}/Atria-Dawn-Preview` });
+        const messages = await collect(
+          service.invoke('Read only', {
+            sessionId,
+            invocationId: 'inv-pure-boundary',
+            toolExecutionPolicy: { mode: 'read_only' },
+            callbackEnv: { CAT_CAFE_OC_BASE_URL: 'https://discovery-api.intern-ai.org.cn/v1' },
+            spawnCliOverride: async function* () {
+              calls++;
+              yield STEP_START;
+              yield STEP_FINISH;
+            },
+          }),
+        );
+        assert.equal(calls, 0);
+        const error = messages.find((m) => m.type === 'error');
+        assert.match(error.error, /兼容插件/);
+        assert.equal(error.metadata.cliDiagnostics.debugRef.invocationId, 'inv-pure-boundary');
+        assert.equal(messages.filter((m) => m.type === 'done').length, 1);
+      }
+    });
+  }
 
   test('pure compatibility guard respects effective model and account endpoint overrides', async () => {
     for (const overrides of [

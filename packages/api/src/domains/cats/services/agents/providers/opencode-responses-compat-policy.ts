@@ -9,5 +9,7 @@ export function isDiscoveryUrl(value: string, path: string): boolean {
 }
 
 export function requiresDiscoveryResponsesPlugin(model: string, baseUrl: string | null | undefined): boolean {
-  return model.startsWith('openai-responses/') && typeof baseUrl === 'string' && isDiscoveryUrl(baseUrl, '/v1');
+  return (
+    model.toLowerCase().startsWith('openai-responses/') && typeof baseUrl === 'string' && isDiscoveryUrl(baseUrl, '/v1')
+  );
 }

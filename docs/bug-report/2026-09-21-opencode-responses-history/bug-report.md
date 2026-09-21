@@ -105,6 +105,15 @@ The seven changed code/test files pass Biome after normalizing checkout CRLF.
 These fork checks supersede the original-base counts below for local delivery;
 the earlier live probes remain evidence for the unchanged compatibility code.
 
+Fork cloud review identified a case-sensitive pure-mode guard although API-type
+derivation accepts case-insensitive provider names. The shared guard now applies
+the same lowercase comparison without changing the model passed to the CLI.
+Before the fix, mixed-case and uppercase service tests failed in both read-only
+preflight and post-tool finalization (four failures, lowercase controls passed).
+After the fix, all four suites pass **133/133**, API `tsc` exits 0, and the changed
+code/test files pass Biome. No new live endpoint probe was needed for this
+pre-spawn boundary; these tests assert that the incompatible CLI never starts.
+
 - Red: the new focused tests produced four expected failures (missing plugin
   and two errors emitted instead of one).
 - Review delta red: five failures independently demonstrate both pure-mode
