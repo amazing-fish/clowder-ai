@@ -121,6 +121,17 @@ The run used isolated HOME/USERPROFILE/XDG directories, `NODE_ENV=test`,
 `CAT_CAFE_TEST_SANDBOX=1`, `REDIS_URL=redis://localhost:6398`, and unset runtime
 root/data/carrier overrides. Local logs: `.tmp/acp-validation/final-*.log`.
 
+The fallback scanner flags boolean OR predicates and branch selection in the
+new state module. These are state transitions, not fallback implementations:
+the final-status OR defines the ACP terminal set; the pending OR aggregates
+three independent wait sources; the permission-kind OR shares ID bookkeeping;
+the ID validity OR selects legacy anonymous tracking; the final-ID guard rejects
+replay. Removing one loses a tested state distinction. In HTTP, the existing
+synthetic-ID default remains, the done/session guard isolates prompts, and the
+new catch routes late response failure instead of substituting success.
+The test scanner hits are transport dispatch, envelope decoding, and warning
+selection. No alternate execution backend, retry, or fallback transport was added.
+
 Architecture cell: cats/services/agents/providers/acp; Map delta: none.
 Why: waiting is prompt-local transport bookkeeping; both transports need one
 state contract, with the existing final-status semantics shared by projection.
