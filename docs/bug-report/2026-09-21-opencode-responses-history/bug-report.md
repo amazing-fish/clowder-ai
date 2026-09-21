@@ -48,7 +48,11 @@ ownership. No new server, dependency, credential store, or transport protocol.
    permanent-failure path, yielding the upstream error and ending iteration
    before a generic exit event can trigger a second invocation. Unknown 400/422
    errors now identify the HTTP rejection and explain protocol compatibility.
-   Existing classified error guidance remains authoritative.
+   This applies to any APIError with that explicit marker, including auxiliary
+   calls; it does not infer permanence for all HTTP 400 responses. For 400/422,
+   classify only the error heading: validation details may quote arbitrary
+   prompt text such as `quota` or `ENOENT`. Classified heading guidance remains
+   authoritative.
 5. Make the config-writer path assertion portable using the exact `join(...)`
    result; its previous slash-only regex failed on Windows.
 
@@ -59,30 +63,63 @@ The compatibility rule is endpoint-specific; a different regional endpoint is
 not assumed to share this behavior without evidence. `opencode --pure` disables
 external plugins and therefore also disables this compatibility hook.
 
-The fallback scanner flags five constructs in the plugin. They are boundary
+The service's own pure-mode paths keep that isolation boundary intact. For
+Discovery Responses, a post-tool finalizer uses the existing deterministic
+completion text (`responses_compat_requires_plugin`) without another CLI spawn;
+it does not expose raw tool results. Read-only requests return an explicit
+diagnostic before spawn, preserving any existing session. This includes fresh
+requests, since a tool round trip can create assistant history within one turn.
+Other endpoints and protocols keep their existing pure-mode behavior. Ordinary
+continuation is supported; model-generated finalization and read-only execution
+through this endpoint are not claimed to work in pure mode.
+
+The fetch wrapper gates on the actual request URL, independent of config-hook
+environment substitution timing. It supports both string `init.body` and a
+cloned `Request` body without consuming the original request. SDK body formats
+other than these are passed through unchanged; the verified SDK uses strings.
+
+The fallback scanner flags syntax constructs in the plugin/policy. They are boundary
 guards, not alternate transport paths: invalid URLs and non-JSON bodies pass
 unchanged; absent provider config means no provider to visit; the provider/URL
 predicate restricts scope; `options.fetch ?? globalThis.fetch` composes an
 existing fetch implementation or uses the platform default. Removing them
 would either throw on unrelated input or discard another plugin's fetch hook.
-Normalization belongs at this request boundary, not in persisted chat history.
+The request method default follows fetch's Request/init precedence. The
+400/422 heading/name choice handles missing provider messages without treating
+reflected request content as diagnostic evidence. Normalization belongs at this
+request boundary, not in persisted chat history. The pure-mode guard reuses
+the existing finalizer fallback instead of adding another transport path.
 
 ## Validation
 
 - Red: the new focused tests produced four expected failures (missing plugin
   and two errors emitted instead of one).
-- Green: OpenCode service, config, and compatibility suites: 109 tests passed,
+- Review delta red: five failures independently demonstrate both pure-mode
+  holes, reflected-body misclassification, unresolved config placeholders,
+  and Request-body normalization before the changes.
+- Green: OpenCode service, config, and compatibility suites: 114 tests passed,
   zero failures. This includes existing transient-error recovery coverage.
 - API TypeScript typecheck passed; repository-wide Biome check passed.
 - Full `pnpm check` on Windows stops in the unchanged
   `scripts/check-f290-product-copy.test.mjs`: its POSIX expected path disagrees
   with Windows `path.join` output. The source and assertion are identical to
   base `5968c19ad`. This is not reported as a full-gate pass; Linux CI is needed.
-- Actual CLI, isolated HOME/USERPROFILE/XDG directories and temporary cwd:
-  fresh turn → resume → read a fixture file → resume after tool use all returned
+- Initial actual CLI validation, isolated HOME/USERPROFILE/XDG directories and temporary cwd:
+  ordinary fresh turn → resume → read a fixture file → resume after tool use all returned
   exit 0 with empty stderr. The last two turns both returned the fixture value.
   Config came from the built `generateOpenCodeRuntimeConfig`; the CLI loaded the
   compiled plugin directly and contacted the configured endpoint without a proxy.
+- After the review delta, fresh and ordinary resumed turns again exited 0 with
+  empty stderr. The read-tool invocation completed its file read, then hit the
+  probe's 100-second timeout before final text (no APIError/400 emitted).
+  With the isolated CLI process confirmed stopped, a subsequent invocation of
+  the same isolated session exited 0, empty stderr, and returned the exact
+  `fixture-value-314159` from that tool result. This proves post-tool history
+  continuity; it is not reported as four uninterrupted successful invocations.
+- That live sequence does not exercise the service's `--pure` finalizer. Its
+  no-spawn behavior and read-only preflight are covered through service tests;
+  the reviewer independently reproduced pure fresh success / pure resume 400
+  on OpenCode 1.18.30 before the guards were added.
 - Unit tests preserve reasoning/encrypted items; the live scenario proves text
   and read-tool continuation, not every possible provider-native tool type.
 

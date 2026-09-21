@@ -65,7 +65,9 @@ test('compatibility leaves other hosts, protocols, and paths untouched', async (
     'http://discovery-api.intern-ai.org.cn/v1',
   ]) {
     const ctx = await configuredFetch(base);
-    assert.equal(ctx.fetch, ctx.originalFetch);
+    const init = { method: 'POST', body: '{"input":[{"role":"assistant","content":[]}]}' };
+    await ctx.fetch(`${base}/responses`, init);
+    assert.equal(ctx.calls[0][1], init);
   }
   const chat = await configuredFetch(endpoint.replace('/responses', ''), '@ai-sdk/openai-compatible');
   assert.equal(chat.fetch, chat.originalFetch);
@@ -75,6 +77,31 @@ test('compatibility leaves other hosts, protocols, and paths untouched', async (
   assert.equal(ctx.calls[0][1], init);
   await ctx.fetch('https://elsewhere.test/v1/responses', init);
   assert.equal(ctx.calls[1][1], init);
+});
+
+test('request URL is authoritative even before config env substitution', async () => {
+  const ctx = await configuredFetch('{env:CAT_CAFE_OC_BASE_URL}');
+  await ctx.fetch(endpoint, { method: 'POST', body: '{"input":[{"role":"assistant","content":[]}]}' });
+  assert.equal(JSON.parse(ctx.calls[0][1].body).input[0].type, 'message');
+});
+
+test('Request bodies are normalized without consuming the caller request or losing fetch options', async () => {
+  const ctx = await configuredFetch();
+  const original = '{"input":[{"role":"assistant","content":[]}]}';
+  const request = new Request(endpoint, {
+    method: 'POST',
+    body: original,
+    headers: { authorization: 'Bearer test-only' },
+  });
+  const init = { signal: new AbortController().signal };
+  assert.equal(await ctx.fetch(request, init), ctx.response);
+  const [input, options] = ctx.calls[0];
+  assert.equal(input, request);
+  assert.equal(input.headers.get('authorization'), 'Bearer test-only');
+  assert.equal(options.signal, init.signal);
+  assert.equal(JSON.parse(options.body).input[0].type, 'message');
+  assert.equal(request.bodyUsed, false);
+  assert.equal(await request.text(), original);
 });
 
 test('fresh input, explicit types, malformed JSON, and non-JSON bodies pass through unchanged', async () => {
