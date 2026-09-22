@@ -384,9 +384,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // frontend folded panel (Phase B) sees reasonCode / safeExcerpt / publicHint
           // even when CLI never exits non-zero (some providers emit error events then exit 0).
           let yieldMetadata: MessageMetadata = metadata;
+          let terminateAfterYield = false;
           if (result.type === 'error') {
             const rawError = (event as Record<string, unknown>).error as
-              | { name?: string; data?: { message?: string; statusCode?: number } }
+              | { name?: string; data?: { message?: string; statusCode?: number; isRetryable?: boolean } }
               | undefined;
             log.warn(
               {
@@ -398,9 +399,18 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               },
               'OpenCode CLI returned error event',
             );
-            if (rawError?.data?.message) {
+            const diagnosticText = [
+              // Validation details quote arbitrary prompt text. Classify only the heading.
+              rawError?.data?.statusCode === 400 || rawError?.data?.statusCode === 422
+                ? (rawError.data.message?.split(/\r?\n/, 1)[0] ?? rawError.name)
+                : (rawError?.data?.message ?? rawError?.name),
+              rawError?.data?.statusCode ? `HTTP ${rawError.data.statusCode}` : undefined,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join('\n');
+            if (diagnosticText) {
               const cliDiagnostics = buildCliDiagnostics({
-                rawText: rawError.data.message,
+                rawText: diagnosticText,
                 debugRef: {
                   command: 'opencode',
                   exitCode: null,
@@ -408,8 +418,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
                   ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
                 },
               });
+              if (
+                !cliDiagnostics.reasonCode &&
+                (rawError?.data?.statusCode === 400 || rawError?.data?.statusCode === 422)
+              ) {
+                cliDiagnostics.publicSummary = `上游拒绝请求（HTTP ${rawError.data.statusCode}）`;
+                cliDiagnostics.publicHint = '请检查 CLI 与上游端点的请求格式及协议兼容性；重复发送相同请求无法修复。';
+              }
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
+            terminateAfterYield = rawError?.name === 'APIError' && rawError.data?.isRetryable === false;
             errorAlreadyYielded = true;
           }
           // P2-1: Only emit the first session_init; subsequent step_start events
@@ -427,6 +445,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           const mergedMetadata: MessageMetadata =
             result.metadata?.usage != null ? { ...yieldMetadata, usage: result.metadata.usage } : yieldMetadata;
           yield { ...result, metadata: mergedMetadata };
+          // End the generator before exit-1 can replace this permanent cause and trigger a retry.
+          if (terminateAfterYield) break;
         }
       }
 

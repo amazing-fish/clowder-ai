@@ -155,6 +155,62 @@ describe('OpenCodeAgentService', () => {
     assert.equal(summary.catCafeOcBaseUrl, '(unset)');
   });
 
+  test('reports non-retryable Responses rejection once without classifying reflected prompt text', async () => {
+    const proc = createMockProcess(1);
+    const service = new OpenCodeAgentService({
+      spawnFn: mock.fn(() => proc),
+      model: 'openai-responses/Atria-Dawn-Preview',
+    });
+    const pending = collect(service.invoke('Continue'));
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        error: {
+          name: 'APIError',
+          data: {
+            message: '240 validation errors:\n reflected prompt: quota exceeded ENOENT',
+            statusCode: 400,
+            isRetryable: false,
+          },
+        },
+      })}\n`,
+    );
+    proc.stdout.end();
+    emitProcessExit(proc, 1);
+    const messages = await pending;
+    const errors = messages.filter((message) => message.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].metadata.cliDiagnostics.publicSummary, /HTTP 400/);
+    assert.equal(errors[0].metadata.cliDiagnostics.reasonCode, undefined);
+    assert.equal(messages.at(-1).type, 'done');
+  });
+
+  test('allows retryable provider errors to recover and return text', async () => {
+    const proc = createMockProcess();
+    const service = new OpenCodeAgentService({
+      spawnFn: mock.fn(() => proc),
+      model: 'openai-responses/Atria-Dawn-Preview',
+    });
+    const pending = collect(service.invoke('Continue'));
+    emitOpenCodeEvents(proc, [
+      {
+        type: 'error',
+        error: {
+          name: 'APIError',
+          data: {
+            message: 'Service temporarily unavailable',
+            statusCode: 503,
+            isRetryable: true,
+          },
+        },
+      },
+      TEXT_RESPONSE,
+    ]);
+    const messages = await pending;
+    assert.ok(messages.some((message) => message.type === 'text'));
+    assert.equal(messages.at(-1).type, 'done');
+  });
+
   test('yields session_init, text, done from opencode events', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
