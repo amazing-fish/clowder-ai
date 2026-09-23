@@ -23,6 +23,8 @@ describe('F291 Codex speed contract', () => {
     ['gpt-5.6-sol', true],
     ['gpt-5.6-terra', true],
     ['openai/gpt-5.6-sol', true],
+    ['gpt-6-sol', true],
+    ['openai/gpt-6-sol', true],
     ['gpt-5.3-codex', false],
     ['gpt-6', false],
     ['', false],

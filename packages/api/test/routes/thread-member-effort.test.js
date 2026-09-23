@@ -174,6 +174,36 @@ describe('F262 thread member effort routes', () => {
     }
   });
 
+  it('accepts GPT-6 Sol none effort and rejects unsupported ultra', async () => {
+    const previousSolModel = process.env.CAT_CODEX_SOL_MODEL;
+    try {
+      process.env.CAT_CODEX_SOL_MODEL = 'gpt-6-sol';
+
+      const setRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
+        headers: HEADERS,
+        payload: { effort: 'none' },
+      });
+      assert.equal(setRes.statusCode, 200);
+      const selected = JSON.parse(setRes.payload);
+      assert.equal(selected.effective, 'none');
+      assert.deepEqual(selected.options, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+      const rejected = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
+        headers: HEADERS,
+        payload: { effort: 'ultra' },
+      });
+      assert.equal(rejected.statusCode, 400);
+      assert.equal(threadStore.getMemberEffort(THREAD_ID, 'codex-sol'), 'none');
+    } finally {
+      if (previousSolModel === undefined) delete process.env.CAT_CODEX_SOL_MODEL;
+      else process.env.CAT_CODEX_SOL_MODEL = previousSolModel;
+    }
+  });
+
   it('rejects invalid, unsupported, shared-default, missing, and foreign requests', async () => {
     const invalid = await app.inject({
       method: 'PATCH',

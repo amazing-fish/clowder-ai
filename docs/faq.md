@@ -82,6 +82,12 @@ Clowder AI works with any agent CLI that supports MCP (Model Context Protocol):
 
 See the project README for setup instructions for each CLI.
 
+### How do I use GPT-6 Sol through Codex CLI?
+
+Run `codex --version` and use **0.156.1 or later**. The [Codex 0.156.1 release](https://github.com/openai/codex/releases/tag/rust-v0.156.1) added GPT-6 Sol to its model catalog. Your account must also have access. In Hub, add `gpt-6-sol` to an OpenAI OAuth account under System settings → Accounts, then set the desired member's model to `gpt-6-sol`. Existing member defaults are not changed automatically.
+
+Supported reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; `ultra` is unsupported. The [model specification](https://developers.openai.com/api/docs/models/gpt-6-sol) lists a 1,050,000-token context window. Clowder AI displays available token usage but leaves cost unknown when the CLI usage cannot reliably identify the actual service tier and long-context pricing bracket. Verify the selected model with one new turn and one resumed turn.
+
 ## How does the Bootcamp work?
 
 Bootcamp is a guided onboarding experience where your AI team walks you through a complete feature lifecycle -- from kickoff to review to merge.
