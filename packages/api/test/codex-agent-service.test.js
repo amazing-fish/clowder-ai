@@ -24,7 +24,9 @@ const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js
 // merely to reach that mock. Production still defaults to `codex`.
 class CodexAgentService extends ProductionCodexAgentService {
   constructor(options = {}) {
-    super({ ...options, cliCommand: process.execPath });
+    // Windows `where` cannot parse the unquoted absolute Node path when it
+    // contains spaces. Resolve the PATH name; the mock still owns the spawn.
+    super({ ...options, cliCommand: process.platform === 'win32' ? 'node' : process.execPath });
   }
 }
 
@@ -1943,6 +1945,29 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       args.includes('model_reasoning_effort="ultra"'),
       `expected thread ultra override, got argv: ${JSON.stringify(args)}`,
     );
+  });
+
+  test('GPT-6 Sol keeps model and none effort on fresh and resumed exec turns', async () => {
+    for (const sessionId of [undefined, 'gpt-6-session']) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-6-sol',
+      });
+      const promise = collect(service.invoke('hello', { sessionId, reasoningEffortOverride: 'none' }));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: sessionId ?? 'gpt-6-session' }]);
+      const messages = await promise;
+      assert.ok(spawnFn.mock.calls.length > 0, `expected CLI spawn; messages=${JSON.stringify(messages)}`);
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const modelIndex = args.indexOf('--model');
+      assert.equal(args[modelIndex + 1], 'gpt-6-sol');
+      assert.equal(args.includes('resume'), Boolean(sessionId));
+      assert.ok(args.includes('model_reasoning_effort="none"'));
+      assert.equal(messages.at(-1)?.metadata?.model, 'gpt-6-sol');
+    }
   });
 
   test('F262 rejects a stale thread ultra override for an older effective Codex model', async () => {

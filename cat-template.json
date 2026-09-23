@@ -94,7 +94,7 @@
     },
     "codex": {
       "defaultModel": "gpt-5.4",
-      "models": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4"]
+      "models": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-6-sol"]
     },
     "gemini": {
       "defaultModel": "Gemini 3.1 Pro (High)",

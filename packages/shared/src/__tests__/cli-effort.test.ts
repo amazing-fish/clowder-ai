@@ -9,6 +9,18 @@ import {
 } from '../cli-effort.js';
 
 describe('CLI effort capabilities', () => {
+  it('exposes the documented GPT-6 Sol efforts without GPT-5.6-only ultra', () => {
+    const expected = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+    expect(getCliEffortOptionsForProvider('openai', 'gpt-6-sol')).toEqual(expected);
+    expect(getCliEffortOptionsForProvider('openai', 'openai/gpt-6-sol')).toEqual(expected);
+    expect(isValidCliEffortForProvider('openai', 'none', 'gpt-6-sol')).toBe(true);
+    expect(isValidCliEffortForProvider('openai', 'ultra', 'gpt-6-sol')).toBe(false);
+    expect(resolveCliEffortOverride('openai', 'gpt-6-sol', 'xhigh', 'none')).toMatchObject({
+      effective: 'none',
+      compatibility: 'compatible',
+    });
+  });
+
   it('exposes max and ultra only for GPT-5.6 OpenAI models', () => {
     expect(getCliEffortOptionsForProvider('openai', 'gpt-5.6-sol')).toEqual([
       'low',

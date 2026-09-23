@@ -1,6 +1,6 @@
 import type { CatProvider } from './types/cat.js';
 
-export const CLI_EFFORT_VALUES = ['low', 'medium', 'high', 'max', 'xhigh', 'ultra'] as const;
+export const CLI_EFFORT_VALUES = ['none', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'] as const;
 /** Maintained cross-client presets used by thread overrides and Hub suggestions. */
 export type CliEffortPreset = (typeof CLI_EFFORT_VALUES)[number];
 /** Canonical non-empty provider-native value persisted on a member. */
@@ -26,6 +26,8 @@ const CLI_EFFORT_OPTIONS_BY_PROVIDER: Record<CliEffortProvider, readonly CliEffo
 };
 
 const GPT_5_6_OPENAI_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+/** GPT-6 Sol model card: none / low / medium / high / xhigh / max (no ultra). */
+const GPT_6_SOL_OPENAI_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 const CLI_EFFORT_DEFAULT_BY_PROVIDER: Record<CliEffortProvider, CliEffortPreset> = {
   anthropic: 'max',
@@ -61,6 +63,7 @@ export function getCliEffortOptionsForProvider(
   model?: string | null,
 ): readonly CliEffortPreset[] | null {
   if (!isCliEffortProvider(provider)) return null;
+  if (provider === 'openai' && normalizeModelSlug(model) === 'gpt-6-sol') return GPT_6_SOL_OPENAI_EFFORT_OPTIONS;
   if (provider === 'openai' && isGpt56Model(model)) return GPT_5_6_OPENAI_EFFORT_OPTIONS;
   if (provider === 'kimi') return isKimiEffortCapableModel(model) ? CLI_EFFORT_OPTIONS_BY_PROVIDER.kimi : null;
   return CLI_EFFORT_OPTIONS_BY_PROVIDER[provider];
