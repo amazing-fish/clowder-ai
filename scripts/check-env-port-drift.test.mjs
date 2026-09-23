@@ -464,6 +464,21 @@ describe(
   },
 );
 
+describe('Web production build command', () => {
+  it('launches the Next CLI through the signal adapter on Windows', { skip: process.platform !== 'win32' }, () => {
+    const webBuild = readJsonFile('packages/web/package.json').scripts?.build;
+    const [nodeCommand, ...args] = webBuild.split(' ');
+    assert.equal(nodeCommand, 'node');
+    args[args.length - 1] = '--version';
+
+    const output = execFileSync(process.execPath, args, {
+      cwd: resolve(ROOT, 'packages/web'),
+      encoding: 'utf8',
+    });
+    assert.match(output, /Next\.js/);
+  });
+});
+
 // In the home repo (cat-cafe), code defaults are API=3002 / Frontend=3001.
 // In the open-source repo (clowder-ai), sync transforms them to Frontend=3003 / API=3004.
 const expectedApiPort = isHomeRepo ? '3002' : '3004';
@@ -1304,7 +1319,10 @@ excluded:
       const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
       const webBuild = readJsonFile('packages/web/package.json').scripts?.build;
 
-      assert.equal(webBuild, 'node ../../scripts/run-preserving-signal-exit.mjs next build');
+      assert.equal(
+        webBuild,
+        'node ../../scripts/run-preserving-signal-exit.mjs node ./node_modules/next/dist/bin/next build',
+      );
       assert.ok(
         managedScripts.has('scripts/run-preserving-signal-exit.mjs'),
         'the exported Web build must not reference an adapter omitted from the public sync closure',
