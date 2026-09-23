@@ -26,7 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, posix, resolve } from 'node:path';
+import { dirname, posix, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
 
 const ROOT = resolve(process.cwd());
@@ -477,6 +477,36 @@ describe('Web production build command', () => {
     });
     assert.match(output, /Next\.js/);
   });
+});
+
+describe('Collective client build cleanup', () => {
+  it(
+    'cleans its dist directory on Windows without removing sibling files',
+    { skip: process.platform !== 'win32' },
+    () => {
+      const fixture = mkdtempSync(resolve(tmpdir(), 'clowder-collective-clean-'));
+      assert.ok(fixture.startsWith(`${resolve(tmpdir())}${sep}`));
+      const dist = resolve(fixture, 'dist');
+      const keep = resolve(fixture, 'keep.txt');
+      mkdirSync(dist);
+      mkdirSync(resolve(fixture, 'scripts'));
+      writeFileSync(
+        resolve(fixture, 'scripts', 'clean.mjs'),
+        readFileSync(resolve(ROOT, 'packages/collective-client/scripts/clean.mjs')),
+      );
+      writeFileSync(resolve(dist, 'compiled.js'), 'compiled');
+      writeFileSync(keep, 'keep');
+
+      try {
+        const clean = readJsonFile('packages/collective-client/package.json').scripts.clean;
+        execFileSync('cmd.exe', ['/d', '/c', clean], { cwd: fixture, encoding: 'utf8' });
+        assert.equal(existsSync(dist), false);
+        assert.equal(readFileSync(keep, 'utf8'), 'keep');
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 // In the home repo (cat-cafe), code defaults are API=3002 / Frontend=3001.
