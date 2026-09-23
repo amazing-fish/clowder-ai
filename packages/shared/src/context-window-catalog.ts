@@ -29,6 +29,8 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
   'gpt-5.3': 128_000,
   'gpt-5.2': 128_000,
   'gpt-5.1-codex': 400_000,
+  // OpenAI GPT-6 Sol model card: https://developers.openai.com/api/docs/models/gpt-6-sol
+  'gpt-6-sol': 1_050_000,
   o3: 200_000,
   'o4-mini': 200_000,
   // MiniMax
