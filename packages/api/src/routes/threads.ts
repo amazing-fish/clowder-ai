@@ -19,10 +19,10 @@ import {
   aggregateThreadArtifacts,
   collectAllThreadMessages,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
-import { resolveHostWorkspaceRoot } from '../domains/cats/services/host-workspace-root.js';
 import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/closure/freshness-closure-telemetry.js';
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
+import { resolveHostWorkspaceRoot } from '../domains/cats/services/host-workspace-root.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
 import { compareCursors, parseCursor } from '../domains/cats/services/stores/cursor.js';

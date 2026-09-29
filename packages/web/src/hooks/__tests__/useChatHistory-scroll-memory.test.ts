@@ -16,8 +16,15 @@ vi.mock('@/utils/api-client', () => ({
 
 let capturedHook: ReturnType<typeof useChatHistory> | null = null;
 
-function HookProbe({ threadId }: { threadId: string }) {
+function HookProbe({
+  threadId,
+  onCapture,
+}: {
+  threadId: string;
+  onCapture?: (hook: ReturnType<typeof useChatHistory>) => void;
+}) {
   capturedHook = useChatHistory(threadId);
+  onCapture?.(capturedHook);
   return React.createElement(
     'div',
     { ref: capturedHook.scrollContainerRef },
@@ -213,6 +220,72 @@ describe('useChatHistory scroll memory (#27)', () => {
     defineMutableNumberProp(restoredEl, 'scrollHeight', 1000);
     act(() => flushAnimationFrames());
     expect(restoredTop.get()).toBe(200);
+  });
+
+  it('follows compact thread B while full thread A remains mounted and scrolled up', async () => {
+    const threadA = 'thread-mounted-full-a';
+    const threadB = 'thread-mounted-compact-b';
+    const aMessages = [makeMsg('a1', 1)];
+    const bMessages = [makeMsg('b1', 2)];
+    useChatStore.setState({
+      currentThreadId: threadA,
+      messages: aMessages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadA]: makeThreadState(aMessages),
+        [threadB]: makeThreadState(bMessages),
+      },
+    });
+
+    let fullHook: ReturnType<typeof useChatHistory> | null = null;
+    let compactHook: ReturnType<typeof useChatHistory> | null = null;
+    await act(async () =>
+      root.render(
+        React.createElement(
+          ThreadChatHistoryAdmissionProvider,
+          null,
+          React.createElement(HookProbe, { threadId: threadA, onCapture: (hook) => (fullHook = hook) }),
+          React.createElement(HookProbe, { threadId: threadB, onCapture: (hook) => (compactHook = hook) }),
+        ),
+      ),
+    );
+
+    const fullEl = fullHook!.scrollContainerRef.current!;
+    const compactEl = compactHook!.scrollContainerRef.current!;
+    const fullTop = defineMutableNumberProp(fullEl, 'scrollTop', 400);
+    defineMutableNumberProp(fullEl, 'clientHeight', 600);
+    defineMutableNumberProp(fullEl, 'scrollHeight', 1000);
+    const compactTop = defineMutableNumberProp(compactEl, 'scrollTop', 400);
+    defineMutableNumberProp(compactEl, 'clientHeight', 600);
+    defineMutableNumberProp(compactEl, 'scrollHeight', 1000);
+    const fullEnd = fullHook!.messagesEndRef.current!;
+    const compactEnd = compactHook!.messagesEndRef.current!;
+    fullEnd.scrollIntoView = vi.fn(() => fullTop.set(400));
+    compactEnd.scrollIntoView = vi.fn(() => compactTop.set(400));
+    act(() => flushAnimationFrames());
+    act(() => fullHook?.handleScroll());
+    act(() => fullEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
+    fullTop.set(200);
+    act(() => fullHook?.handleScroll());
+
+    act(() => compactHook?.jumpToLatest());
+    expect(compactEnd.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadB, [...bMessages, makeMsg('b2', 3)]);
+    });
+    expect(compactEnd.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadA, [...aMessages, makeMsg('a2', 4)]);
+    });
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('retries saved offset restore until the remounted thread becomes scrollable again', async () => {

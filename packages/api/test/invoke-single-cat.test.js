@@ -10196,10 +10196,16 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         },
       };
 
-      const msgs = await collect(invokeSingleCat(deps, {
-        catId: 'opencode', service, prompt: 'test missing project path', userId: 'user1',
-        threadId: `thread-default-project-path-${threadKind ?? 'ordinary'}`, isLastCat: true,
-      }));
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'test missing project path',
+          userId: 'user1',
+          threadId: `thread-default-project-path-${threadKind ?? 'ordinary'}`,
+          isLastCat: true,
+        }),
+      );
       assert.equal(invokedService, false, `${threadKind ?? 'ordinary'} OpenCode must not inherit runtime cwd`);
       assert.ok(
         msgs.some((m) => m.type === 'error' && String(m.error).includes('OpenCode requires a thread projectPath')),
@@ -10229,13 +10235,25 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     try {
-      const msgs = await collect(invokeSingleCat(deps, {
-        catId: 'opencode', service, prompt: 'concierge question', userId: 'user1',
-        threadId: 'thread-concierge-workspace', isLastCat: true,
-      }));
-      assert.ok(msgs.some((m) => m.type === 'done'), `expected done, got ${msgs.map((m) => m.type).join(',')}`);
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'concierge question',
+          userId: 'user1',
+          threadId: 'thread-concierge-workspace',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(
+        msgs.some((m) => m.type === 'done'),
+        `expected done, got ${msgs.map((m) => m.type).join(',')}`,
+      );
       assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot);
-      assert.equal(msgs.some((m) => m.type === 'error'), false);
+      assert.equal(
+        msgs.some((m) => m.type === 'error'),
+        false,
+      );
     } finally {
       if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
@@ -10265,10 +10283,16 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     try {
-      const msgs = await collect(invokeSingleCat(deps, {
-        catId: 'opencode', service, prompt: 'concierge question', userId: 'user1',
-        threadId: 'thread-concierge-no-workspace', isLastCat: true,
-      }));
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'concierge question',
+          userId: 'user1',
+          threadId: 'thread-concierge-no-workspace',
+          isLastCat: true,
+        }),
+      );
       assert.equal(invokedService, false);
       assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('workspace root is not configured')));
     } finally {
