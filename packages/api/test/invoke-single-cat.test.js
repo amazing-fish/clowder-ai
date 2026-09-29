@@ -10362,51 +10362,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.cliSessionId, undefined, 'unknown-workspace resume id must not reach diagnostics');
   });
 
-  it('runs an ordinary default-path OpenCode turn in the configured host workspace (#1548)', async () => {
-    const workspaceRoot = await realpath(await mkdtemp(join(tmpdir(), 'ordinary-workspace-root-')));
-    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
-    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
-    const optionsSeen = [];
-    const service = {
-      l0CompilerFn: dummyL0CompilerFn,
-      async *invoke(_prompt, options) {
-        optionsSeen.push(options ?? {});
-        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-      },
-    };
-    const deps = {
-      ...makeDeps(),
-      threadStore: {
-        get: async () => ({ projectPath: 'default', createdBy: 'user1' }),
-        updateParticipantActivity: async () => {},
-      },
-    };
-
-    try {
-      const msgs = await collect(
-        invokeSingleCat(deps, {
-          catId: 'opencode',
-          service,
-          prompt: 'organize threads',
-          userId: 'user1',
-          threadId: 'thread-ordinary-default-workspace',
-          isLastCat: true,
-        }),
-      );
-      assert.ok(
-        msgs.some((m) => m.type === 'done'),
-        `expected done, got ${msgs.map((m) => m.type).join(',')}`,
-      );
-      assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot);
-    } finally {
-      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
-      await rmWithRetry(workspaceRoot);
-    }
-  });
-
-  it('fails loud for gate-keeping OpenCode when thread projectPath is default', async () => {
-    for (const threadKind of ['gate-keeping']) {
+  it('fails loud for OpenCode when thread projectPath is default', async () => {
+    for (const threadKind of [undefined, 'gate-keeping']) {
       let invokedService = false;
       const service = {
         l0CompilerFn: dummyL0CompilerFn,
@@ -10488,42 +10445,40 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('rejects default-path concierge and ordinary OpenCode when runtime has no host workspace', async () => {
+  it('rejects default-path concierge OpenCode when runtime has no host workspace', async () => {
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
     process.env.CAT_CAFE_RUNTIME_ROOT = await realpath(await mkdtemp(join(tmpdir(), 'concierge-runtime-root-')));
     delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    let invokedService = false;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        invokedService = true;
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: 'default', threadKind: 'concierge', createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+    };
 
     try {
-      for (const threadKind of ['concierge', undefined]) {
-        let invokedService = false;
-        const service = {
-          l0CompilerFn: dummyL0CompilerFn,
-          async *invoke() {
-            invokedService = true;
-            yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-          },
-        };
-        const deps = {
-          ...makeDeps(),
-          threadStore: {
-            get: async () => ({ projectPath: 'default', threadKind, createdBy: 'user1' }),
-            updateParticipantActivity: async () => {},
-          },
-        };
-        const msgs = await collect(
-          invokeSingleCat(deps, {
-            catId: 'opencode',
-            service,
-            prompt: 'question without project',
-            userId: 'user1',
-            threadId: `thread-no-host-workspace-${threadKind ?? 'ordinary'}`,
-            isLastCat: true,
-          }),
-        );
-        assert.equal(invokedService, false, `${threadKind ?? 'ordinary'} must fail closed`);
-        assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('workspace root is not configured')));
-      }
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'concierge question',
+          userId: 'user1',
+          threadId: 'thread-concierge-no-workspace',
+          isLastCat: true,
+        }),
+      );
+      assert.equal(invokedService, false);
+      assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('workspace root is not configured')));
     } finally {
       await rmWithRetry(process.env.CAT_CAFE_RUNTIME_ROOT);
       if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;

@@ -2637,10 +2637,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             }
           }
-        } else if (thread.bootcampState || (requiresThreadWorkspace && thread.threadKind !== 'gate-keeping')) {
-          // #1547/#1548: unbound (default-path) concierge and ordinary threads use the
-          // validated host workspace; runtime mode without CAT_CAFE_WORKSPACE_ROOT still
-          // fails closed. Gate-keeping threads map to external repos and stay strict.
+        } else if (thread.bootcampState || (requiresThreadWorkspace && thread.threadKind === 'concierge')) {
           const hostWorkspace = await resolveHostWorkspaceRoot();
           if (hostWorkspace.ok) {
             workingDirectory = hostWorkspace.projectPath;
