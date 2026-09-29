@@ -22,6 +22,7 @@ import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
+import { AcpToolWaitState } from './acp-tool-state.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -487,7 +488,7 @@ export class AcpClient {
     let lastEventAt = 0;
     let idleWarningFired = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    let pendingTool = false; // true while Gemini is waiting for MCP tool result
+    const toolWait = new AcpToolWaitState();
     let budgetTimer: ReturnType<typeof setTimeout> | null = null;
     const promptRequestId = randomUUID();
 
@@ -538,6 +539,7 @@ export class AcpClient {
         // event must never report a duration smaller than its own trigger point.
         const rawIdle = Date.now() - lastEventAt;
         const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
+        const pendingTool = toolWait.pending;
         if (!idleWarningFired) {
           idleWarningFired = true;
           if (pendingTool) {
@@ -595,7 +597,7 @@ export class AcpClient {
 
     const listener = (notif: AcpNotification) => {
       const params = notif.params as unknown as AcpSessionUpdate;
-      if (params.sessionId !== sessionId) return;
+      if (done || params.sessionId !== sessionId) return;
       queue.push(params);
       // F149: Track real events for idle watchdog
       eventCount++;
@@ -606,6 +608,8 @@ export class AcpClient {
       // and flat (params.sessionUpdate) — must handle both, same as acp-event-transformer.
       const inner = (params.update ?? params) as Record<string, unknown>;
       const updateType = inner.sessionUpdate as string | undefined;
+      toolWait.observe(inner);
+      const pendingTool = toolWait.pending;
       // Diagnostic: log every event type + raw keys for unclassified events
       if (updateType) {
         log.info({ sessionId, eventCount, updateType, pendingTool }, 'ACP listener: event received');
@@ -618,15 +622,6 @@ export class AcpClient {
           { sessionId, eventCount, method, rawKeys, innerKeys, pendingTool, raw: JSON.stringify(params).slice(0, 500) },
           'ACP listener: unclassified event — no sessionUpdate type',
         );
-      }
-      if (updateType === 'tool_call' || updateType === 'permission_pending') {
-        pendingTool = true;
-      } else if (
-        pendingTool &&
-        updateType !== 'tool_call_update' &&
-        updateType !== 'agent_thought_chunk' // Thought chunks during tool execution are normal — don't reset
-      ) {
-        pendingTool = false; // Real output event → tool execution completed
       }
       scheduleIdleCheck();
       resetBudget(); // Activity-based: any event resets the turn budget
@@ -936,21 +931,7 @@ export class AcpClient {
         if (method === ACP_METHODS.requestPermission) {
           // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
           // Best-effort auto-approve with synthetic id (Gemini may ignore it).
-          // Also notify stream listeners so idle watchdog suppresses stall during permission wait.
-          const permParams = msg.params as Record<string, unknown>;
-          log.info(
-            { method, sessionId: permParams.sessionId },
-            'ACP: permission notification (no id) — auto-approve + suppress stall',
-          );
-          this.handleAgentRequest({ ...msg, id: `synth-perm-${Date.now()}` } as unknown as AcpAgentRequest);
-          // Inject synthetic event into stream so promptStream sets pendingTool=true
-          for (const listener of this.notificationListeners) {
-            listener({
-              jsonrpc: '2.0',
-              method: ACP_METHODS.sessionUpdate,
-              params: { sessionId: permParams.sessionId, sessionUpdate: 'permission_pending' },
-            } as unknown as AcpNotification);
-          }
+          this.handleAgentRequest({ ...msg, id: `synth-perm-${randomUUID()}` } as unknown as AcpAgentRequest);
         } else {
           // Notification from agent (session/update)
           for (const listener of this.notificationListeners) {
@@ -1039,7 +1020,20 @@ export class AcpClient {
 
   private handleAgentRequest(req: AcpAgentRequest): void {
     if (req.method === ACP_METHODS.requestPermission) {
+      // Capture this prompt's listeners: a late decision must not update the next prompt.
+      const listeners = [...this.notificationListeners];
+      const notifyPermission = (sessionUpdate: 'permission_pending' | 'permission_resolved') => {
+        for (const listener of listeners) {
+          listener({
+            jsonrpc: '2.0',
+            method: ACP_METHODS.sessionUpdate,
+            params: { sessionId: req.params.sessionId, sessionUpdate, permissionRequestId: String(req.id) },
+          } as unknown as AcpNotification);
+        }
+      };
+      notifyPermission('permission_pending');
       const respond = (result: { optionId: string }) => {
+        notifyPermission('permission_resolved');
         // ACP spec: response must wrap in { outcome: { outcome: "selected", optionId } }
         const acpResult = {
           outcome: { outcome: 'selected' as const, optionId: result.optionId },
@@ -1053,6 +1047,7 @@ export class AcpClient {
         try {
           this.config.permissionHandler(req, respond);
         } catch (err) {
+          notifyPermission('permission_resolved');
           log.error('permissionHandler threw: %s', (err as Error).message);
           const errResponse = {
             jsonrpc: '2.0' as const,

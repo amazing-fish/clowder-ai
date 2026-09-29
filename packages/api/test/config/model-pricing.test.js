@@ -16,6 +16,11 @@ describe('model-pricing', () => {
       assert.equal(getModelPricing('unknown-model-xyz'), undefined);
     });
 
+    it('does not guess GPT-6 Sol cost without the served tier and context bracket', () => {
+      assert.equal(getModelPricing('gpt-6-sol'), undefined);
+      assert.equal(estimateCostFromTokens('gpt-6-sol', 300_000, 10_000), null);
+    });
+
     it('covers all expected Codex variants including long-context', () => {
       for (const model of [
         'gpt-5.3-codex',

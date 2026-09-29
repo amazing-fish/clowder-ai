@@ -37,6 +37,7 @@ import {
   buildAcpSpawnLogFields,
 } from './AcpClient.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
+import { AcpToolWaitState } from './acp-tool-state.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
@@ -73,6 +74,8 @@ export interface AcpHttpStreamClientConfig extends AcpClientConfig {
 interface AgentResponseOptions {
   responseTimeoutMs?: number;
   signal?: AbortSignal;
+  onPermissionResolved?: () => void;
+  onResponseError?: (error: unknown) => void;
 }
 
 // ─── Client ──────────────────────────────────────────────────
@@ -263,7 +266,7 @@ export class AcpHttpStreamClient {
     let idleWarningFired = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let budgetTimer: ReturnType<typeof setTimeout> | null = null;
-    let pendingTool = false;
+    const toolWait = new AcpToolWaitState();
     let stopReason: AcpStopReason = 'end_turn';
     let promptError: Error | null = null;
     let done = false;
@@ -316,7 +319,7 @@ export class AcpHttpStreamClient {
     };
 
     const enqueueSessionUpdate = (params: AcpSessionUpdate | Record<string, unknown>) => {
-      if (params.sessionId !== sessionId) return;
+      if (done || params.sessionId !== sessionId) return;
 
       queue.push(params as AcpSessionUpdate);
       eventCount++;
@@ -324,25 +327,29 @@ export class AcpHttpStreamClient {
       idleWarningFired = false;
 
       const inner = (params.update ?? params) as Record<string, unknown>;
-      const updateType = inner.sessionUpdate as string | undefined;
-      if (updateType === 'tool_call' || updateType === 'permission_pending') {
-        pendingTool = true;
-      } else if (pendingTool && updateType !== 'tool_call_update' && updateType !== 'agent_thought_chunk') {
-        pendingTool = false;
-      }
+      toolWait.observe(inner);
       scheduleIdleCheck();
       resetBudget();
       wakeConsumer();
     };
 
     const handleAgentRequestFromStream = async (msg: Record<string, unknown>, msgId: string | undefined) => {
-      const requestId = msgId ?? `synth-perm-${Date.now()}`;
+      const requestId = msgId ?? `synth-perm-${randomUUID()}`;
       const req = { ...msg, id: requestId } as unknown as AcpAgentRequest;
+      const notifyPermission = (sessionUpdate: 'permission_pending' | 'permission_resolved') => {
+        enqueueSessionUpdate({ sessionId: req.params.sessionId, sessionUpdate, permissionRequestId: requestId });
+      };
       if (req.method === ACP_METHODS.requestPermission) {
-        const params = req.params as Record<string, unknown>;
-        enqueueSessionUpdate({ sessionId: params.sessionId, sessionUpdate: 'permission_pending' });
+        notifyPermission('permission_pending');
       }
-      await this.handleAgentRequest(req, { responseTimeoutMs: timeoutMs, signal: controller.signal });
+      await this.handleAgentRequest(req, {
+        responseTimeoutMs: timeoutMs,
+        signal: controller.signal,
+        onPermissionResolved: () => notifyPermission('permission_resolved'),
+        onResponseError: (error) => {
+          if (!done) failPrompt(error);
+        },
+      });
     };
 
     const isAgentRequest = (method: string | undefined, msgId: string | undefined) =>
@@ -358,6 +365,7 @@ export class AcpHttpStreamClient {
         if (done) return;
         const rawIdle = Date.now() - lastEventAt;
         const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
+        const pendingTool = toolWait.pending;
         if (!idleWarningFired) {
           idleWarningFired = true;
           const updateType = pendingTool ? 'stream_tool_wait_warning' : 'stream_idle_warning';
@@ -740,6 +748,7 @@ export class AcpHttpStreamClient {
 
     if (req.method === ACP_METHODS.requestPermission) {
       const respond = (result: { optionId: string }) => {
+        options.onPermissionResolved?.();
         const acpResult = {
           outcome: { outcome: 'selected' as const, optionId: result.optionId },
         };
@@ -751,8 +760,12 @@ export class AcpHttpStreamClient {
         try {
           this.config.permissionHandler(req, (result) => {
             responsePromise = respond(result);
+            // The handler may respond after this method returns; always consume
+            // rejection and route it to the owning prompt, including late decisions.
+            void responsePromise.catch((error) => options.onResponseError?.(error));
           });
         } catch (err) {
+          options.onPermissionResolved?.();
           log.error('HTTP permissionHandler threw: %s', (err as Error).message);
           await this.sendAgentResponse(
             {

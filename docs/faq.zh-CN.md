@@ -82,6 +82,12 @@ Clowder AI 可与任何支持 MCP（Model Context Protocol）的 Agent CLI 配�
 
 请参阅项目 README 获取每个 CLI 的设置说明。
 
+### 如何让 Codex CLI 使用 GPT-6 Sol？
+
+先运行 `codex --version`，使用 **0.156.1 或更新版本**；[Codex 0.156.1 发布记录](https://github.com/openai/codex/releases/tag/rust-v0.156.1)首次明确加入 GPT-6 Sol 的模型目录。账号也须具备该模型的使用权限。在 Hub 的「系统配置 → 账户配置」中为 OpenAI OAuth 账户添加 `gpt-6-sol`，再将所需成员的模型设为 `gpt-6-sol`。现有成员的默认模型不会自动改变。
+
+可选推理档位为 `none`、`low`、`medium`、`high`、`xhigh`、`max`，不支持 `ultra`。[模型规格](https://developers.openai.com/api/docs/models/gpt-6-sol)给出的上下文窗口为 1,050,000 tokens。Clowder AI 会显示可用的 token usage；在无法从 CLI 用量中可靠区分实际服务档位和长上下文计费档时，费用保持未知，不套用旧模型的单价。配置完成后，用新会话和续接会话各发一条消息，确认模型标识与回复均正确。
+
 ## Bootcamp 如何运作？
 
 Bootcamp 是一段引导式的上手体验，你的 AI 团队会带你走完一个完整的功能生命周期 —— 从启动、评审到合并。

@@ -188,6 +188,9 @@ const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
   'runtime_disconnected',
 ]);
 let _openCodeKnownModels: Set<string> | null = null;
+// Distinguishes "the catalog answered and does not list this model" from "the
+// catalog never answered". Only the former is evidence of a catalog-less model.
+let _openCodeCatalogResolved = false;
 
 interface MemoryCueLegacyFallbackProjection {
   readonly opportunityId: string;
@@ -529,6 +532,7 @@ export function getOpenCodeKnownModels(): Set<string> {
     const opencodePath = resolveCliCommand('opencode');
     if (!opencodePath) {
       _openCodeKnownModels = new Set();
+      _openCodeCatalogResolved = false;
       return _openCodeKnownModels;
     }
     const stdout = execFileSync(opencodePath, ['models'], {
@@ -543,15 +547,31 @@ export function getOpenCodeKnownModels(): Set<string> {
         .map((line) => line.trim())
         .filter(Boolean),
     );
+    _openCodeCatalogResolved = true;
   } catch {
     _openCodeKnownModels = new Set();
+    _openCodeCatalogResolved = false;
   }
   return _openCodeKnownModels;
 }
 
+/**
+ * True only when `opencode models` actually answered — an unavailable CLI or a
+ * failed/timed-out probe yields an empty set, which is NOT evidence that a model
+ * is catalog-less. Treating it as such would emit a `limit` block for a
+ * catalog-backed model and override its authoritative (often smaller) output cap,
+ * so limit emission must fail closed on an unresolved catalog.
+ * @internal Exposed for tests
+ */
+export function isOpenCodeCatalogResolved(): boolean {
+  getOpenCodeKnownModels();
+  return _openCodeCatalogResolved;
+}
+
 /** @internal Exposed for tests */
-export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
+export function _resetOpenCodeKnownModels(override?: Set<string> | null, resolved = true): void {
   _openCodeKnownModels = override ?? null;
+  _openCodeCatalogResolved = override != null && resolved;
 }
 
 import {
@@ -3123,6 +3143,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = safeModel;
       const apiType = deriveOpenCodeApiType(effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      // clowder#1481: the research-cat context blow-up. OpenCode resolves a
+      // model's limit as `config ?? catalog ?? 0`, and its runtime disables
+      // auto-compaction outright at `limit.context === 0`
+      // (SessionCompaction.isOverflow returns false) — which is exactly what an
+      // unresolvable model gets. The tool loop then grows its prompt until the
+      // provider rejects it (`context_window_exceeded`); the session was never
+      // compressed because the runtime never knew the window.
+      //
+      // We already resolved that window for this invocation, so hand it to the
+      // runtime — but ONLY when `opencode models` does not list the model id the
+      // config actually writes, so a catalog-backed model keeps its authoritative
+      // context AND output limits. `safeModel` is that exact id: when the member's
+      // provider name collides with an OpenCode builtin it is remapped
+      // (`openai/...` → `openai-compat/...`), and the builtin's catalog entry no
+      // longer applies — so the remapped id is correctly treated as catalog-less.
+      // The config template pairs it with OpenCode's own OUTPUT_TOKEN_MAX, so the
+      // request output cap is unchanged either way.
+      const resolvedWindowTokens = invocationCapacitySnapshot?.capacity.windowTokens ?? 0;
+      // Fail closed on an unresolved catalog: an unavailable or failed
+      // `opencode models` probe returns an empty set, which means "unknown", not
+      // "catalog-less". Emitting a limit there would override a catalog-backed
+      // model's authoritative — often smaller — output cap.
+      const defaultModelContextWindow =
+        isApiKey && isOpenCodeCatalogResolved() && !getOpenCodeKnownModels().has(safeModel) && resolvedWindowTokens > 0
+          ? resolvedWindowTokens
+          : undefined;
       const runtimeConfigOptions = {
         providerName: effectiveProviderName,
         models: rawModels,
@@ -3131,6 +3177,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         omitProviderAuth: !isApiKey,
+        ...(defaultModelContextWindow != null ? { defaultModelContextWindow } : {}),
         mcpServerPath,
         ...(openCodeAllowedWorkspaceDirs ? { allowedWorkspaceDirs: openCodeAllowedWorkspaceDirs } : {}),
         // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.

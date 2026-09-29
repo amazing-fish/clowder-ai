@@ -618,6 +618,33 @@ test('F291 app-server preserves Fast and explicit Standard on thread start/resum
   await inheritRun;
 });
 
+test('GPT-6 Sol app-server start/resume retains the model and none effort', async () => {
+  for (const thread of [{ kind: 'start' }, { kind: 'resume', threadId: 'gpt-6-session' }]) {
+    const wire = new ProtocolWire();
+    const client = new CodexAppServerClient({ wire });
+    const run = collect(
+      client.run({
+        prompt: frozenPrompt('work'),
+        thread,
+        model: 'gpt-6-sol',
+        config: { model_reasoning_effort: 'none' },
+      }),
+    );
+    await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+    const request = wire.writes.find((message) => message.method === `thread/${thread.kind}`);
+    assert.equal(request.params.model, 'gpt-6-sol');
+    assert.equal(request.params.config.model_reasoning_effort, 'none');
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: {
+        threadId: thread.kind === 'resume' ? thread.threadId : 'thread-1',
+        turn: { id: 'turn-1', status: 'completed' },
+      },
+    });
+    await run;
+  }
+});
+
 test('early generator return releases the carrier before cleanup lifecycle can be abandoned', async () => {
   const wire = new ProtocolWire();
   const client = new CodexAppServerClient({ wire });

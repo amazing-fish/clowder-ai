@@ -37,7 +37,7 @@ export function isCodexSpeedValue(value: unknown): value is CodexSpeedValue {
  */
 export function supportsCodexFastModel(model: string | null | undefined): boolean {
   const slug = model?.trim().toLowerCase().split('/').at(-1) ?? '';
-  return /^gpt-5\.(?:4|5|6)(?:$|[-.])/.test(slug);
+  return /^gpt-5\.(?:4|5|6)(?:$|[-.])/.test(slug) || slug === 'gpt-6-sol';
 }
 
 export function resolveCodexSpeed(input: ResolveCodexSpeedInput): CodexSpeedResolution {

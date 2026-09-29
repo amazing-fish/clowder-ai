@@ -523,8 +523,8 @@ export function CardBlock({
     <div className={`border-l-4 rounded-r-lg p-3 ${toneStyle}`}>
       <div className="font-medium text-sm">{block.title}</div>
       {block.bodyMarkdown && (
-        <div className="mt-1 text-xs text-cafe-secondary [&_.markdown-content]:text-xs [&_p]:mb-1 [&_p:last-child]:mb-0">
-          <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
+        <div className="mt-1 text-sm text-cafe-secondary [&_.markdown-content]:text-sm [&_p]:mb-1 [&_p:last-child]:mb-0">
+          <MarkdownContent content={block.bodyMarkdown} className="!text-sm" disableCommandPrefix />
         </div>
       )}
       {block.fields && block.fields.length > 0 && (

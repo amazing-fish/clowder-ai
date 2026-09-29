@@ -64,6 +64,17 @@ it('standalone API key creation submits the selected identity', async () => {
   expect(created).toHaveBeenCalledWith('fixture');
 });
 
+it('offers GPT-6 Sol to a Codex OAuth account and saves the selected model', async () => {
+  await act(async () =>
+    root.render(<UnifiedAuthModal open onClose={close} onCreated={created} initialClientId="openai" />),
+  );
+  await fill('例如: my-claude-account', 'sol-oauth');
+  await click('+ gpt-6-sol');
+  await click('保存');
+  const body = JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body));
+  expect(body.models).toContain('gpt-6-sol');
+});
+
 it('editing a legacy API key account can declare identity without replacing its secret', async () => {
   await act(async () =>
     root.render(

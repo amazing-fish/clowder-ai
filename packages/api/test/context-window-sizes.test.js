@@ -21,6 +21,7 @@ describe('getContextWindowFallback', () => {
     assert.equal(getContextWindowFallback('claude-sonnet-4-6'), 1_000_000);
     assert.equal(getContextWindowFallback('claude-sonnet-4-5'), 200_000);
     assert.equal(getContextWindowFallback('gpt-5.3'), 128_000);
+    assert.equal(getContextWindowFallback('gpt-6-sol'), 1_050_000);
     assert.equal(getContextWindowFallback('MiniMax-M3'), 1_000_000);
     assert.equal(getContextWindowFallback('minimax-m3'), 1_000_000);
     assert.equal(getContextWindowFallback('glm-5.2'), 1_000_000);
@@ -53,6 +54,7 @@ describe('getContextWindowFallback', () => {
     assert.equal(getContextWindowFallback('anthropic/claude-sonnet-4-6'), 1_000_000);
     assert.equal(getContextWindowFallback('anthropic/claude-sonnet-4-5'), 200_000);
     assert.equal(getContextWindowFallback('openai-compat/gpt-5.3'), 128_000);
+    assert.equal(getContextWindowFallback('openai/gpt-6-sol'), 1_050_000);
     assert.equal(getContextWindowFallback('openai-compat/gpt-5.1-codex'), 400_000);
     assert.equal(getContextWindowFallback('minimax/MiniMax-M3'), 1_000_000);
     assert.equal(getContextWindowFallback('minimax/minimax-m3'), 1_000_000);
