@@ -106,7 +106,7 @@ import {
 } from '../../../../routing-context/RoutingDispatchSignalContract.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
-import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
+import { resolveHostWorkspaceRoot } from '../../host-workspace-root.js';
 import {
   buildCloudBridgeStatusContent,
   type CloudBridgeAuditContext,
@@ -2523,7 +2523,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // Resolve workingDirectory from thread's projectPath
     let workingDirectory: string | undefined;
     let threadProjectPath: string | undefined;
-    let bootcampWorkspaceError: Error | undefined;
+    let hostWorkspaceError: Error | undefined;
     let workspaceResolutionError: Error | undefined;
     let workspaceResolutionFailureMessage: string | undefined;
     if (threadStore) {
@@ -2617,26 +2617,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             }
           }
-        } else if (thread?.bootcampState) {
-          const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
-          if (bootcampWorkspace.ok) {
-            workingDirectory = bootcampWorkspace.projectPath;
+        } else if (thread.bootcampState || (requiresThreadWorkspace && thread.threadKind === 'concierge')) {
+          const hostWorkspace = await resolveHostWorkspaceRoot();
+          if (hostWorkspace.ok) {
+            workingDirectory = hostWorkspace.projectPath;
           } else {
-            bootcampWorkspaceError = new Error(bootcampWorkspace.error);
+            hostWorkspaceError = new Error(hostWorkspace.error);
           }
         } else if (requiresThreadWorkspace) {
           workspaceResolutionFailureMessage = `OpenCode requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning OpenCode.`;
         }
       }
     }
-    if (requiresThreadWorkspace && threadStore && !workingDirectory && !bootcampWorkspaceError) {
+    if (requiresThreadWorkspace && threadStore && !workingDirectory && !hostWorkspaceError) {
       workspaceResolutionError = new Error(
         workspaceResolutionFailureMessage ??
           `OpenCode requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning OpenCode.`,
       );
     }
-    if (bootcampWorkspaceError) {
-      throw bootcampWorkspaceError;
+    if (hostWorkspaceError) {
+      throw hostWorkspaceError;
     }
     if (workspaceResolutionError) {
       throw workspaceResolutionError;

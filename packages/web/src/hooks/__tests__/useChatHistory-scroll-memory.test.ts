@@ -156,6 +156,65 @@ describe('useChatHistory scroll memory (#27)', () => {
     return boundary;
   }
 
+  it('keeps compact thread scrolling independent from the selected full thread', async () => {
+    const threadA = 'thread-compact-selected-a';
+    const threadB = 'thread-compact-background-b';
+    const aMessages = [makeMsg('a1', 1)];
+    const bMessages = [makeMsg('b1', 2)];
+    useChatStore.setState({
+      currentThreadId: threadA,
+      messages: aMessages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadA]: makeThreadState(aMessages),
+        [threadB]: makeThreadState(bMessages),
+      },
+    });
+
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadA })));
+    const fullEl = capturedHook!.scrollContainerRef.current!;
+    const fullTop = defineMutableNumberProp(fullEl, 'scrollTop', 200);
+    defineMutableNumberProp(fullEl, 'clientHeight', 600);
+    defineMutableNumberProp(fullEl, 'scrollHeight', 1000);
+    cancelInitialRestoreWithWheel(fullEl, -1);
+    act(() => capturedHook?.handleScroll());
+
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadB })));
+    const compactEl = capturedHook!.scrollContainerRef.current!;
+    const compactTop = defineMutableNumberProp(compactEl, 'scrollTop', 0);
+    defineMutableNumberProp(compactEl, 'clientHeight', 600);
+    defineMutableNumberProp(compactEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => compactTop.set(400));
+
+    act(() => capturedHook?.jumpToLatest());
+    expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadB, [...bMessages, makeMsg('b2', 3)]);
+    });
+    expect(endEl.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(fullTop.get()).toBe(200);
+
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadA })));
+    const restoredEl = capturedHook!.scrollContainerRef.current!;
+    const restoredTop = defineMutableNumberProp(restoredEl, 'scrollTop', 0);
+    defineMutableNumberProp(restoredEl, 'clientHeight', 600);
+    defineMutableNumberProp(restoredEl, 'scrollHeight', 1000);
+    act(() => flushAnimationFrames());
+    expect(restoredTop.get()).toBe(200);
+  });
+
   it('retries saved offset restore until the remounted thread becomes scrollable again', async () => {
     const threadA = 'thread-scroll-a';
     const threadB = 'thread-scroll-b';

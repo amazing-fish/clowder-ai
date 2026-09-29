@@ -10179,6 +10179,75 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   });
 
   it('fails loud for OpenCode when thread projectPath is default', async () => {
+    for (const threadKind of [undefined, 'gate-keeping']) {
+      let invokedService = false;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke() {
+          invokedService = true;
+          yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+        },
+      };
+      const deps = {
+        ...makeDeps(),
+        threadStore: {
+          get: async () => ({ projectPath: 'default', threadKind, createdBy: 'user1' }),
+          updateParticipantActivity: async () => {},
+        },
+      };
+
+      const msgs = await collect(invokeSingleCat(deps, {
+        catId: 'opencode', service, prompt: 'test missing project path', userId: 'user1',
+        threadId: `thread-default-project-path-${threadKind ?? 'ordinary'}`, isLastCat: true,
+      }));
+      assert.equal(invokedService, false, `${threadKind ?? 'ordinary'} OpenCode must not inherit runtime cwd`);
+      assert.ok(
+        msgs.some((m) => m.type === 'error' && String(m.error).includes('OpenCode requires a thread projectPath')),
+        `expected missing projectPath error for ${threadKind ?? 'ordinary'}, got: ${msgs.map((m) => m.type).join(',')}`,
+      );
+    }
+  });
+
+  it('runs a default-path concierge OpenCode turn in the configured host workspace', async () => {
+    const workspaceRoot = await realpath(await mkdtemp(join(tmpdir(), 'concierge-workspace-root-')));
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: 'default', threadKind: 'concierge', createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+    };
+
+    try {
+      const msgs = await collect(invokeSingleCat(deps, {
+        catId: 'opencode', service, prompt: 'concierge question', userId: 'user1',
+        threadId: 'thread-concierge-workspace', isLastCat: true,
+      }));
+      assert.ok(msgs.some((m) => m.type === 'done'), `expected done, got ${msgs.map((m) => m.type).join(',')}`);
+      assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot);
+      assert.equal(msgs.some((m) => m.type === 'error'), false);
+    } finally {
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await rmWithRetry(workspaceRoot);
+    }
+  });
+
+  it('rejects default-path concierge OpenCode when runtime has no host workspace', async () => {
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = await realpath(await mkdtemp(join(tmpdir(), 'concierge-runtime-root-')));
+    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
     let invokedService = false;
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
@@ -10187,31 +10256,28 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
-
     const deps = {
       ...makeDeps(),
       threadStore: {
-        get: async () => ({ projectPath: 'default', createdBy: 'user1' }),
+        get: async () => ({ projectPath: 'default', threadKind: 'concierge', createdBy: 'user1' }),
         updateParticipantActivity: async () => {},
       },
     };
 
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'opencode',
-        service,
-        prompt: 'test missing project path',
-        userId: 'user1',
-        threadId: 'thread-default-project-path',
-        isLastCat: true,
-      }),
-    );
-
-    assert.equal(invokedService, false, 'OpenCode must not inherit runtime cwd when projectPath is default');
-    assert.ok(
-      msgs.some((m) => m.type === 'error' && String(m.error).includes('OpenCode requires a thread projectPath')),
-      `expected missing projectPath error, got: ${msgs.map((m) => m.type).join(',')}`,
-    );
+    try {
+      const msgs = await collect(invokeSingleCat(deps, {
+        catId: 'opencode', service, prompt: 'concierge question', userId: 'user1',
+        threadId: 'thread-concierge-no-workspace', isLastCat: true,
+      }));
+      assert.equal(invokedService, false);
+      assert.ok(msgs.some((m) => m.type === 'error' && String(m.error).includes('workspace root is not configured')));
+    } finally {
+      await rmWithRetry(process.env.CAT_CAFE_RUNTIME_ROOT);
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+    }
   });
 
   it('fails loud for OpenCode when thread projectPath is rejected by project-path validation', async () => {
