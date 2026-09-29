@@ -5,12 +5,16 @@ export interface AntigravityAgentKeySidecarPolicyOptions {
   env?: Record<string, string | undefined>;
 }
 
-export function shouldProvisionAntigravityAgentKeySidecar({
+export function getAntigravityAgentKeySidecarSkipReason({
   backendKind,
   env = process.env,
-}: AntigravityAgentKeySidecarPolicyOptions): boolean {
-  if (env.CAT_CAFE_AGENT_KEY_SIDECAR_DISABLED === '1') return false;
-  if (env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR !== '1') return false;
-  if (backendKind === 'redis') return true;
-  return env.CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR === '1';
+}: AntigravityAgentKeySidecarPolicyOptions): 'disabled' | 'not-owner' | 'memory-backend' | null {
+  if (env.CAT_CAFE_AGENT_KEY_SIDECAR_DISABLED === '1') return 'disabled';
+  if (env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR !== '1') return 'not-owner';
+  if (backendKind === 'redis' || env.CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR === '1') return null;
+  return 'memory-backend';
+}
+
+export function shouldProvisionAntigravityAgentKeySidecar(options: AntigravityAgentKeySidecarPolicyOptions): boolean {
+  return getAntigravityAgentKeySidecarSkipReason(options) === null;
 }

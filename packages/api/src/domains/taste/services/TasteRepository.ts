@@ -36,6 +36,12 @@ function parseWorktrees(raw: string): GitWorktree[] {
   return worktrees;
 }
 
+/** Resolve a dedicated checkout for desktop APIs running from non-Git userdata. */
+export function resolveTasteGitRoot(fallback: string): string {
+  const override = process.env.CAT_CAFE_TASTE_GIT_ROOT?.trim();
+  return resolve(override || fallback);
+}
+
 /**
  * Canonical F221 Taste repository.
  *

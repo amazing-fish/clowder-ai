@@ -1398,7 +1398,7 @@ describe('AcpClient', () => {
   // ─── permission_pending suppresses stall even without prior tool_call ───
   // Runtime scenario: thought_chunk → request_permission (no tool_call first)
 
-  it('permission notification injects permission_pending to suppress stall', async () => {
+  it('unanswered permission notification injects permission_pending', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     let promptId = null;
 
@@ -1448,7 +1448,15 @@ describe('AcpClient', () => {
       }
     });
 
-    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      permissionHandler: (_req, respond) => {
+        setTimeout(() => respond({ optionId: 'proceed_once' }), 180);
+      },
+    });
     await client.initialize();
     await client.newSession();
 

@@ -240,7 +240,7 @@ import { createRoutingContextRuntime } from './domains/routing-context/index.js'
 import { createRuntimeInteractionRuntime } from './domains/runtime-interaction/runtime-interaction-composition.js';
 import { appendServiceLog } from './domains/services/service-lifecycle.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
-import { FileTasteRepository } from './domains/taste/services/TasteRepository.js';
+import { FileTasteRepository, resolveTasteGitRoot } from './domains/taste/services/TasteRepository.js';
 import { createVignetteWriter } from './domains/taste/services/writeVignette.js';
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
@@ -550,6 +550,22 @@ async function main(): Promise<void> {
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
 
+  // Reapply Hub-persisted app settings (default cat, bubble defaults, ...) from
+  // the config-root .env. The launcher only sources the install .env, so
+  // without this every Hub setting silently reverts on restart.
+  const { loadProjectEnvIntoProcess } = await import('./config/project-env-loader.js');
+  const projectEnvLoad = loadProjectEnvIntoProcess();
+  if (projectEnvLoad.applied.length > 0 || projectEnvLoad.skipped.length > 0) {
+    customLogger.info(
+      {
+        applied: projectEnvLoad.applied,
+        skipped: projectEnvLoad.skipped,
+        envFile: projectEnvLoad.envFile,
+      },
+      '[api] applied Hub-persisted app settings from config-root .env',
+    );
+  }
+
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
   const telemetryHandle = initTelemetry();
@@ -784,12 +800,13 @@ async function main(): Promise<void> {
   let ownsGlobalAgentKeySidecars = false;
   let agentKeySidecarRenewalLoop: { start(): void; stop(): Promise<void> } | null = null;
   try {
-    const { shouldProvisionAntigravityAgentKeySidecar } = await import(
+    const { getAntigravityAgentKeySidecarSkipReason } = await import(
       './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar-policy.js'
     );
-    ownsGlobalAgentKeySidecars = shouldProvisionAntigravityAgentKeySidecar({
+    const sidecarSkipReason = getAntigravityAgentKeySidecarSkipReason({
       backendKind: agentKeyRegistryBackendKind,
     });
+    ownsGlobalAgentKeySidecars = sidecarSkipReason === null;
     if (ownsGlobalAgentKeySidecars) {
       const { ensureAntigravityAgentKeySidecar } = await import(
         './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
@@ -798,9 +815,14 @@ async function main(): Promise<void> {
       app.log.info(
         `[api] Antigravity agent-key sidecar ready: ${sidecar.filePath} (${sidecar.catId}/${sidecar.userId})`,
       );
-    } else {
+    } else if (sidecarSkipReason === 'memory-backend') {
       app.log.warn(
         '[api] Antigravity agent-key sidecar skipped: memory AgentKeyRegistry cannot safely back global sidecar files; set CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR=1 only for local degraded development',
+      );
+    } else {
+      app.log.info(
+        { reason: sidecarSkipReason, backendKind: agentKeyRegistryBackendKind },
+        '[api] Antigravity agent-key sidecar skipped by process policy',
       );
     }
   } catch (err) {
@@ -880,7 +902,7 @@ async function main(): Promise<void> {
   // F221 Phase B: taste proposal store (InMemory now; Redis in Task 3)
   const tasteProposalStore = createTasteProposalStore(redis);
   const tasteApprovalLock = new SessionMutex();
-  const tasteRepository = new FileTasteRepository(findMonorepoRoot(process.cwd()));
+  const tasteRepository = new FileTasteRepository(resolveTasteGitRoot(findMonorepoRoot(process.cwd())));
 
   // F235: Community issue draft store + publisher for "Publish to Community" flow
   const communityIssueDraftStore = createCommunityIssueDraftStore(redis);
