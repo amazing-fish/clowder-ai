@@ -606,4 +606,26 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(args.includes('--print'), 'should use --print flag');
     assert.ok(args.includes('--prompt'), 'should use --prompt flag');
   });
+
+  test('codex: probe waits past 30s (codex exec startup can exceed it)', async (t) => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    // Child that never exits — only the probe timeout can settle it.
+    const spawnFn = () => {
+      const proc = new EventEmitter();
+      proc.stdin = { write() {}, end() {} };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => true;
+      return proc;
+    };
+    let settled = null;
+    tryCliProbe('codex', { spawnFn }).then((r) => (settled = r));
+    t.mock.timers.tick(31_000);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(settled, null, 'codex probe must not time out at 30s');
+    t.mock.timers.tick(60_000);
+    await new Promise((r) => setImmediate(r));
+    assert.ok(settled && !settled.ok && settled.message.includes('响应超时'));
+  });
 });

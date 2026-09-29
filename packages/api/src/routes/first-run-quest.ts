@@ -56,6 +56,8 @@ interface CliProbeSpec {
   args: (model?: string) => string[];
   /** Full shell command for exec()-based invocation. When set, exec() is used. */
   execCmd?: (model?: string) => string;
+  /** Per-CLI probe timeout override (defaults to PROBE_TIMEOUT_MS). */
+  timeoutMs?: number;
 }
 
 /**
@@ -76,6 +78,8 @@ const CLI_PROBE_SPECS: Record<string, CliProbeSpec> = {
   },
   codex: {
     args: (m) => ['exec', ...(m ? ['--model', m] : []), 'reply pong'],
+    // `codex exec` cold start (hooks + MCP + reasoning) routinely takes 30–40s.
+    timeoutMs: 90_000,
   },
   gemini: {
     args: (m) => ['-p', 'reply pong', ...(m ? ['--model', m] : [])],
@@ -163,7 +167,7 @@ export async function tryCliProbe(
   }
 
   /* ── spawn() path — direct invocation probes ───────────────────────── */
-  return spawnProbe(client, spec.args(model), execEnv, opts.spawnFn);
+  return spawnProbe(client, spec.args(model), execEnv, opts.spawnFn, spec.timeoutMs);
 }
 
 /** exec()-based probe — identical to main-branch tryCliProbe for shell CLIs. */
@@ -211,6 +215,7 @@ function spawnProbe(
   cliArgs: string[],
   env: NodeJS.ProcessEnv | undefined,
   customSpawn?: ProbeSpawnFn,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; message: string }> {
   const spawnEnv = env ?? { ...process.env };
 
@@ -260,7 +265,7 @@ function spawnProbe(
         /* already exited */
       }
       settle({ ok: false, message: `${client} CLI 响应超时` });
-    }, PROBE_TIMEOUT_MS);
+    }, timeoutMs);
 
     child.stdin?.end();
 
