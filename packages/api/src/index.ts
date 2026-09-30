@@ -161,7 +161,6 @@ import {
 } from './domains/cats/services/runtime-session/RuntimeSessionSealReaper.js';
 import { createRuntimeSessionStore } from './domains/cats/services/runtime-session/RuntimeSessionStoreFactory.js';
 import { ContextEpochOwner } from './domains/cats/services/session/ContextEpochOwner.js';
-import { isClaudeProjectHookCarrierReady } from './domains/cats/services/session/claude-project-hook-readiness.js';
 import {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
@@ -2275,15 +2274,8 @@ async function main(): Promise<void> {
     await import('./domains/concierge/ConciergeInvestigationJobStore.js');
   const conciergeInvestigationJobStore = redis ? new _RIJSEarly(redis) : new _MIJSEarly();
 
-  // F247: Cloud invoke bridge — background Host Adapter first. The legacy
-  // PinchTab transport is foreground UI automation and therefore opt-in only.
-  const legacyPinchTabEnabled = process.env.CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE === '1';
-  const pinchTabAdapter = legacyPinchTabEnabled
-    ? new (await import('./domains/cats/services/cloud-bridge/pinchtab-bridge-adapter.js')).PinchTabBridgeAdapter()
-    : null;
-  if (legacyPinchTabEnabled) {
-    app.log.warn('[api] F247 legacy PinchTab bridge explicitly enabled; it may control foreground browser UI');
-  }
+  // F247: Cloud invoke bridge — the background conversation Host adapter is the only transport
+  // (the legacy PinchTab bridge was removed, issue #1538).
   const { CloudInvokeBridge } = await import('./domains/cats/services/cloud-bridge/cloud-invoke-bridge.js');
   const bridgeLogger = (await import('./infrastructure/logger.js')).createModuleLogger('cloud-bridge');
   const { createRefreshablePersonalChromeHostAdapter } = await import(
@@ -2325,7 +2317,6 @@ async function main(): Promise<void> {
   app.addHook('onClose', async () => personalChromeAssistantReturnPoller.stop());
   const cloudInvokeBridge = new CloudInvokeBridge({
     hostAdapter: personalChromeHostAdapter,
-    pinchTabAdapter,
     emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason }) => {
       // invokeSingleCat owns the one user-visible status so route persistence,
       // F167 disposition, and Queue settlement share one child invocation.
@@ -2524,7 +2515,6 @@ async function main(): Promise<void> {
     sessionChainStore,
     contextEpochOwner,
     hookAuthenticationReady: sessionHookAuthenticationReady,
-    claudeProjectHookCarrierReady: isClaudeProjectHookCarrierReady,
     presentationLedger,
     ...(routingContextRuntime ? { routingContextPromptProjection: routingContextRuntime.promptProjection } : {}),
     ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
@@ -7327,9 +7317,10 @@ async function main(): Promise<void> {
       );
     };
 
-    const fetchReviews = async (repo: string, pr: number, sinceId?: number) => {
+    // #1392: every review, never cursor-filtered — a dismissal changes an old review in place.
+    const fetchReviews = async (repo: string, pr: number) => {
       await refreshGitHubSelfLogin();
-      const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
+      const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
       return reviews.map(
         (r: {
           id: number;
