@@ -27,6 +27,10 @@ param(
     [string]$LogLevel
 )
 
+# ValidateSet is case-insensitive but the API's level resolver is not:
+# -LogLevel WARN/SILENT would silently fall back to info. Normalize here.
+if ($LogLevel) { $LogLevel = $LogLevel.ToLowerInvariant() }
+
 $ErrorActionPreference = "Stop"
 
 # clowder-ai#269: ensure UTF-8 output on CJK locale systems.
