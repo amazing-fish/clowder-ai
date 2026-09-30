@@ -13,6 +13,7 @@ import type { AcpVariantConfig } from '../../../../../../config/cat-config-loade
 import { resolveContextCapacity } from '../../../../../../config/context-capacity.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
+import { compileL0ViaSubprocess } from '../l0-compiler.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { AcpAgentService } from './AcpAgentService.js';
 import { AcpClient } from './AcpClient.js';
@@ -24,6 +25,7 @@ import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstra
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
 import { skipAcpProfile } from './acp-registration-failure.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
+import { type DshL0Compiler, resolveDshNativeL0 } from './dsh-native-l0.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 
@@ -38,6 +40,8 @@ export interface CreateAcpServiceForConfigInput {
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
   /** Carry a safe registration failure to the router while leaving this service absent. */
   onUnavailable?: (reason: AgentRegistrationFailure) => void;
+  /** Test seam for the DSH native L0 compile (defaults to the subprocess compiler). */
+  l0CompilerFn?: DshL0Compiler;
 }
 
 interface AcpBootstrapContext {
@@ -299,6 +303,19 @@ export async function createAcpServiceForConfig(
   }
   const spawn = await prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext);
   if (!spawn) return null;
+  // DSH native L0: the content-addressed --patch path lands in bootstrap.args, so an
+  // L0 change changes the spawn signature and retires the old pool on next sync.
+  const l0CompilerFn = input.l0CompilerFn ?? compileL0ViaSubprocess;
+  const dshL0 = await resolveDshNativeL0(catId, bootstrap.command, bootstrap.args, l0CompilerFn, (error) =>
+    input.log.warn(
+      { catId, profileId, error: error instanceof Error ? error.message : String(error) },
+      'ACP DSH: native L0 compile failed; keeping user-prompt identity prepend',
+    ),
+  );
+  if (dshL0) {
+    bootstrap.args = dshL0.args;
+    input.log.info({ catId, profileId, fingerprint: dshL0.fingerprint.slice(0, 12) }, 'ACP DSH: bound native L0 patch');
+  }
   const pool = await ensureAcpPool(effectiveInput, bootstrap, spawn);
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
@@ -323,5 +340,6 @@ export async function createAcpServiceForConfig(
     // #1186: Thread the member's configured idle TTL to AcpAgentService so
     // promptStream uses it as the authoritative no-event termination threshold.
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
+    ...(dshL0 ? { nativeL0: { fingerprint: dshL0.fingerprint, compile: l0CompilerFn } } : {}),
   });
 }

@@ -46,6 +46,7 @@ import {
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
+import { type DshNativeL0Guard, resolveDshL0DriftPrefix } from './dsh-native-l0.js';
 import type { AcpMcpServer, AcpNewSessionResult, AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-agent');
@@ -150,6 +151,8 @@ export interface AcpAgentServiceConfig {
    * typical agent-internal turns like background-task completion steers).
    */
   agentBusyRetryDelaysMs?: number[];
+  /** DSH: L0 bound into the process at spawn (`--patch`); enables native-L0 routing. */
+  nativeL0?: DshNativeL0Guard;
 }
 
 /** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
@@ -179,6 +182,7 @@ export class AcpAgentService implements AgentService {
   private readonly agentBusyRetryDelaysMs: number[];
   /** Becomes true only after this concrete ACP service observes usable standard usage telemetry. */
   private observedUsageUpdate = false;
+  private readonly nativeL0?: DshNativeL0Guard;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -194,6 +198,12 @@ export class AcpAgentService implements AgentService {
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
+    this.nativeL0 = config.nativeL0;
+  }
+
+  /** True only when the spawned process carries the compiled L0 (DSH `--patch`). */
+  injectsL0Natively(): boolean {
+    return this.nativeL0 !== undefined;
   }
 
   contextCapability(): import('../../../types.js').AgentContextCapability {
@@ -573,11 +583,26 @@ export class AcpAgentService implements AgentService {
       const restoresResumeIdentity = resumeDisposition === 'load_failed_fresh' || resumeDisposition === 'sealed_fresh';
       const fallbackSystemPrompt =
         restoresResumeIdentity && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
+      // DSH: if the owner's L0 drifted since spawn, the frozen process L0 is stale
+      // and the route layer only sent pack-only identity — carry current L0 inline.
+      const l0DriftPrefix = this.nativeL0
+        ? await resolveDshL0DriftPrefix(
+            this.nativeL0,
+            this.catId as string,
+            options?.callbackEnv?.CAT_CAFE_USER_ID,
+            (reason, error) =>
+              log.warn(
+                { ...ctx, reason, error: error instanceof Error ? error.message : undefined },
+                'ACP DSH: spawn-time L0 not current; handling drift',
+              ),
+          )
+        : undefined;
+      const promptBody = l0DriftPrefix ? `${l0DriftPrefix}\n\n${prompt}` : prompt;
       const effectivePrompt = options?.systemPrompt
-        ? `${options.systemPrompt}\n\n${prompt}`
+        ? `${options.systemPrompt}\n\n${promptBody}`
         : fallbackSystemPrompt
-          ? `${fallbackSystemPrompt}\n\n${prompt}`
-          : prompt;
+          ? `${fallbackSystemPrompt}\n\n${promptBody}`
+          : promptBody;
 
       // Window 4: onAbort listener covers the duration of promptStream
       promptStreamStartedAt = Date.now();
@@ -775,10 +800,10 @@ export class AcpAgentService implements AgentService {
 
           // Build effective prompt with system prompt (fresh session has no memory)
           const retryPrompt = options?.systemPrompt
-            ? `${options.systemPrompt}\n\n${prompt}`
+            ? `${options.systemPrompt}\n\n${promptBody}`
             : options?.resumeFallbackSystemPrompt
-              ? `${options.resumeFallbackSystemPrompt}\n\n${prompt}`
-              : prompt;
+              ? `${options.resumeFallbackSystemPrompt}\n\n${promptBody}`
+              : promptBody;
 
           const retryState = createAcpSessionState();
           let retryEventCount = 0;
