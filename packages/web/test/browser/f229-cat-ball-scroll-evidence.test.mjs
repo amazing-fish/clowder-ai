@@ -47,6 +47,25 @@ function messages(prefix) {
     catId: 'codex-sol',
     content: `${prefix} message ${index + 1}. ${'This is synthetic browser evidence for independent scroll state. '.repeat(3)}`,
     timestamp: 1_700_000_000_000 + index,
+    ...(index === 0
+      ? {
+          extra: {
+            rich: {
+              v: 1,
+              blocks: [
+                {
+                  id: `${prefix}-layout-widget`,
+                  kind: 'html_widget',
+                  v: 1,
+                  title: `${prefix} layout widget`,
+                  html: `<html><body style="margin:0"><main style="height:1200px">${prefix} synthetic layout content</main></body></html>`,
+                  height: 720,
+                },
+              ],
+            },
+          },
+        }
+      : {}),
   }));
 }
 
@@ -174,6 +193,65 @@ test(
       }, fullOffset);
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '04-full-remount-restored.png'), fullPage: true });
       console.log(JSON.stringify({ fullOffset, restoredOffset: await full.evaluate((element) => element.scrollTop) }));
+
+      // Exercise the real HtmlWidgetBlock producer in both mounted surfaces.
+      await full.evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
+        element.scrollTop = 200;
+      });
+      await compact.evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
+        element.scrollTop = 600;
+      });
+      const fullWidget = full.locator('[data-html-widget="Full A-layout-widget"]');
+      const compactWidget = compact.locator('[data-html-widget="Cat Ball B-layout-widget"]');
+      await fullWidget.getByRole('button', { name: '展开完整内容' }).waitFor();
+      await compactWidget.getByRole('button', { name: '展开完整内容' }).waitFor();
+      await page.waitForTimeout(250);
+      const compactReadingOffset = await compact.evaluate((element) => element.scrollTop);
+      assert.equal(compactReadingOffset, 600);
+      await fullWidget.getByRole('button', { name: '展开完整内容' }).click();
+      await fullWidget.getByRole('button', { name: '收起完整内容' }).waitFor();
+      await page.waitForTimeout(250);
+      assert.equal(await compact.evaluate((element) => element.scrollTop), compactReadingOffset);
+      await fullWidget.getByRole('button', { name: '收起完整内容' }).click();
+      await fullWidget.getByRole('button', { name: '展开完整内容' }).waitFor();
+      await page.waitForTimeout(250);
+      assert.equal(await compact.evaluate((element) => element.scrollTop), compactReadingOffset);
+      await page.screenshot({ path: path.join(EVIDENCE_DIR, '05-full-widget-compact-preserved.png'), fullPage: true });
+
+      const fullReadingOffset = await full.evaluate((element) => element.scrollTop);
+      await compactWidget.getByRole('button', { name: '展开完整内容' }).click();
+      await compactWidget.getByRole('button', { name: '收起完整内容' }).waitFor();
+      await page.waitForTimeout(250);
+      assert.equal(await full.evaluate((element) => element.scrollTop), fullReadingOffset);
+      await compactWidget.getByRole('button', { name: '收起完整内容' }).click();
+      await compactWidget.getByRole('button', { name: '展开完整内容' }).waitFor();
+      await page.waitForTimeout(250);
+      assert.equal(await full.evaluate((element) => element.scrollTop), fullReadingOffset);
+      await page.screenshot({ path: path.join(EVIDENCE_DIR, '06-compact-widget-full-preserved.png'), fullPage: true });
+      const compactPostDisclosureOffset = await compact.evaluate((element) => element.scrollTop);
+      await page.getByTestId('toggle-full-surface').click();
+      await full.waitFor({ state: 'detached' });
+      await page.getByTestId('toggle-full-surface').click();
+      await full.waitFor();
+      await page.waitForFunction((expected) => {
+        const element = document.querySelector('[data-testid="full-surface-host"] [data-chat-container]');
+        return element && Math.abs(element.scrollTop - expected) <= 5;
+      }, fullReadingOffset);
+      assert.equal(await compact.evaluate((element) => element.scrollTop), compactPostDisclosureOffset);
+      await page.screenshot({
+        path: path.join(EVIDENCE_DIR, '07-widget-reading-remount-restored.png'),
+        fullPage: true,
+      });
+      console.log(
+        JSON.stringify({
+          compactReadingOffset,
+          compactPostDisclosureOffset,
+          fullReadingOffset,
+          widgetDirections: 'full↔compact',
+        }),
+      );
     } catch (error) {
       await page
         .screenshot({ path: path.join(EVIDENCE_DIR, 'failed-browser-state.png'), fullPage: true })

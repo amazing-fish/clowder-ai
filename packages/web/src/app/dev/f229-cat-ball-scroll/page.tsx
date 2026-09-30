@@ -15,6 +15,25 @@ function fixtureMessages(prefix: string): ChatMessage[] {
     catId: 'codex-sol',
     content: `${prefix} message ${index + 1}. ${'This is synthetic browser evidence for independent scroll state. '.repeat(3)}`,
     timestamp: 1_700_000_000_000 + index,
+    ...(index === 0
+      ? {
+          extra: {
+            rich: {
+              v: 1 as const,
+              blocks: [
+                {
+                  id: `${prefix}-layout-widget`,
+                  kind: 'html_widget' as const,
+                  v: 1 as const,
+                  title: `${prefix} layout widget`,
+                  html: `<html><body style="margin:0"><main style="height:1200px">${prefix} synthetic layout content</main></body></html>`,
+                  height: 720,
+                },
+              ],
+            },
+          },
+        }
+      : {}),
   }));
 }
 

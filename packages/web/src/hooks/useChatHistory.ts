@@ -2020,7 +2020,9 @@ export function useChatHistory(threadId: string) {
 
       const currentThread = threadIdRef.current;
       const el = scrollContainerRef.current;
-      if (!el) return;
+      // Capture ownership before layout changes can detach the anchor element.
+      // A foreign surface must keep its pending restoration and scroll memory.
+      if (!el || viewportAnchor.container !== el) return;
       cancelPendingRestore();
 
       if (el.contains(viewportAnchor.element)) {
