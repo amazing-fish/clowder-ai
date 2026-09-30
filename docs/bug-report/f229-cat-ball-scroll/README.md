@@ -1,6 +1,6 @@
 # F229 Cat Ball scroll browser evidence
 
-Source revision: `1fbdad6d635282d97b7fa706fb9056b5789c15c5` (PR #1546, before adding these artifact files).
+Source revision: `62da8a151edd9eb582424ecaee56064a4e3bfa7d` (PR #1546, scrolling-only revision rebased by merging upstream main; screenshots recaptured before this artifact commit).
 
 Run: `node --test packages/web/test/browser/f229-cat-ball-scroll-evidence.test.mjs` with a Playwright module available through `F229_PLAYWRIGHT_MODULE` when the public checkout does not contain `packages/ppt-forge`. The test starts its own Next dev server on an available localhost port, uses headless Chromium, and stops the server afterward. It uses synthetic thread/message data and intercepts API requests; no user data or live OpenCode invocation is involved.
 
