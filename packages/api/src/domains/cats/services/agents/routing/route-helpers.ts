@@ -1961,16 +1961,20 @@ async function assembleIncrementalContextInternal(
   const projectionOutput = projectSurfaceShape(options?.contextProjection, deltaSize);
 
   // F148 OQ-3 telemetry: warm/cold path decision
-  log.info({
-    f148: 'path-decision',
-    threadId,
-    catId,
-    messageCount: relevant.length,
-    contextMode: contextMode ?? 'legacy',
-    deltaSize,
-    trigger: countTrigger ? 'count' : tokenTrigger ? 'token' : 'none',
-    thresholds: { count: hcConfig.coldMentionThreshold, token: hcConfig.coldMentionTokenThreshold },
-  });
+  logMeasurement(
+    log,
+    {
+      f148: 'path-decision',
+      threadId,
+      catId,
+      messageCount: relevant.length,
+      contextMode: contextMode ?? 'legacy',
+      deltaSize,
+      trigger: countTrigger ? 'count' : tokenTrigger ? 'token' : 'none',
+      thresholds: { count: hcConfig.coldMentionThreshold, token: hcConfig.coldMentionTokenThreshold },
+    },
+    '[F148] context path decision',
+  );
 
   if (contextMode === 'cold' || deltaSize === 'large') {
     const shaped = await assembleSmartWindowContext(
@@ -2235,16 +2239,20 @@ async function assembleSmartWindowContext(
   // F148 OQ-1 telemetry: burst detection stats
   const actualGapMs =
     burst.length > 0 && omitted.length > 0 ? burst[0].timestamp - omitted[omitted.length - 1].timestamp : null;
-  log.info({
-    f148: 'burst-stats',
-    threadId,
-    catId,
-    totalMessages: relevant.length,
-    burstCount: burst.length,
-    omittedCount: omitted.length,
-    actualGapMs,
-    configuredGapMs: hcConfig.burstSilenceGapMs,
-  });
+  logMeasurement(
+    log,
+    {
+      f148: 'burst-stats',
+      threadId,
+      catId,
+      totalMessages: relevant.length,
+      burstCount: burst.length,
+      omittedCount: omitted.length,
+      actualGapMs,
+      configuredGapMs: hcConfig.burstSilenceGapMs,
+    },
+    '[F148] burst detection stats',
+  );
 
   // 2. Thread title for tombstone + evidence (fail-open like recallEvidence)
   const threadStore = deps.invocationDeps.threadStore;
