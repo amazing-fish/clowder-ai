@@ -13,13 +13,18 @@
   .\scripts\start-windows.ps1 -Memory      # skip Redis, use in-memory storage
   .\scripts\start-windows.ps1 -Dev         # development mode (next dev, hot reload)
   .\scripts\start-windows.ps1 -Debug       # enable debug-level logging (writes to data/logs/api/)
+  .\scripts\start-windows.ps1 -LogLevel warn  # quiet terminal: only warn/error in this window
+                                              # (the log file still keeps info + measurements)
 #>
 
 param(
     [switch]$Quick,
     [switch]$Memory,
     [switch]$Dev,
-    [switch]$Debug
+    [switch]$Debug,
+    # Terminal log threshold for the API (overrides LOG_LEVEL from .env; -Debug wins).
+    [ValidateSet("trace", "debug", "info", "warn", "error", "fatal", "silent")]
+    [string]$LogLevel
 )
 
 $ErrorActionPreference = "Stop"
@@ -550,6 +555,9 @@ try {
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
         CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }
+    # Only when requested: an empty override would unset LOG_LEVEL from .env.
+    # Applied after the job's .env reload, so it wins; -Debug still overrides it.
+    if ($LogLevel) { $runtimeEnvOverrides.LOG_LEVEL = $LogLevel }
 
     # Embedding sidecar (and other Clowder AI ML services) are reconciled by the
     # API startup lifecycle after it starts, per .cat-cafe/services.json. No
@@ -663,6 +671,10 @@ try {
     Write-Host "  Frontend: $frontendMode"
     if ($Debug) {
         Write-Host "  Debug:    ON (logs: $logDir)" -ForegroundColor Yellow
+    } elseif ($LogLevel -eq "silent") {
+        Write-Host "  Logs:     silent (terminal and file)" -ForegroundColor Yellow
+    } elseif ($LogLevel) {
+        Write-Host "  Logs:     terminal=$LogLevel, file keeps info+ ($logDir)"
     }
     Write-Host ""
     Write-Host "  Press Ctrl+C to stop all services" -ForegroundColor Yellow
