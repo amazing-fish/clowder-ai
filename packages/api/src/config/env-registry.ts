@@ -435,15 +435,6 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
-    name: 'CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE',
-    defaultValue: '0',
-    description:
-      'F247 Cloud Cat — 显式启用会控制前台浏览器的 legacy PinchTab bridge；默认 0，Host Adapter 缺失时 fail closed。',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
     name: 'CAT_CAFE_REMOTE_TOKEN',
     defaultValue: '(空)',
     description:
@@ -695,6 +686,15 @@ export const ENV_VARS: EnvDefinition[] = [
     defaultValue: '(未设置 → process.cwd())',
     description:
       'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_COMPACTION_CARRIER_ROOT',
+    defaultValue: '(未设置 → 从模块位置锚定的 install root 解析)',
+    description:
+      'F296/#1542: managed Claude compaction carrier（f24-compaction.mjs）的可信安装根覆盖。仅在部署布局不含标准 packages/api 结构时使用；该根下的 .claude/hooks/f24-compaction.mjs 是唯一被接受的 carrier 坐标，绝不向上搜索',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -2111,13 +2111,6 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'ANTIGRAVITY_PORT',
     defaultValue: '(未设置 → 自动发现)',
     description: 'Antigravity Language Server ConnectRPC 端口（覆盖自动发现）',
-    category: 'antigravity',
-    sensitive: false,
-  },
-  {
-    name: 'PINCHTAB_CDP_PORT',
-    defaultValue: '9870',
-    description: 'PinchTab Chrome CDP 调试端口（覆盖默认 remote-debugging-port）',
     category: 'antigravity',
     sensitive: false,
   },
