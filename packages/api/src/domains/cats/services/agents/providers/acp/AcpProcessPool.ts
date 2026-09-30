@@ -19,6 +19,13 @@ export const DEFAULT_ACP_IDLE_TTL_MS = 30 * 60 * 1000;
 export interface PoolKey {
   projectPath: string;
   providerProfile: string;
+  /**
+   * Process-level launch scope (DSH native L0). `scope` partitions processes so
+   * one scope can never serve another (owner + L0 revision); `args` are the
+   * spawn args for that scope. Omitted for carriers without process-level
+   * per-owner state.
+   */
+  nativeLaunch?: { scope: string; args: readonly string[] };
 }
 
 export interface AcpPoolConfig {
@@ -77,7 +84,8 @@ export interface AcpPoolClient {
 
 /** Factory that creates fresh AcpClient instances. */
 // biome-ignore lint: AcpClient extends this but has more methods — pool doesn't care
-export type AcpClientFactory = () => AcpPoolClient; // eslint-disable-line @typescript-eslint/no-explicit-any
+/** `poolKey` absent = registry-default launch (no owner-scoped native args). */
+export type AcpClientFactory = (poolKey?: PoolKey) => AcpPoolClient; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // ── Internal ──────────────────────────────────────────────────
 
@@ -97,7 +105,8 @@ interface PoolEntry {
 }
 
 function serializeKey(key: PoolKey): string {
-  return `${key.projectPath}::${key.providerProfile}`;
+  const base = `${key.projectPath}::${key.providerProfile}`;
+  return key.nativeLaunch ? `${base}::native:${key.nativeLaunch.scope}` : base;
 }
 
 function serializeSessionKey(key: PoolKey, sessionId: string): string {
@@ -468,7 +477,7 @@ export class AcpProcessPool {
   }
 
   private async spawnEntry(poolKey: PoolKey): Promise<PoolEntry> {
-    const client = this.clientFactory();
+    const client = this.clientFactory(poolKey);
     const entry: PoolEntry = {
       client,
       poolKey,

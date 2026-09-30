@@ -9,16 +9,18 @@ import { describe, it } from 'node:test';
 const mod = await import('../../dist/domains/cats/services/agents/providers/acp/dsh-native-l0.js');
 const {
   DSH_DEFAULT_PERSONA_SUFFIX,
+  DSH_NATIVE_L0_INJECTION_DECISION,
   buildDshL0PatchContent,
+  buildDshNativeInstructions,
   computeDshL0Fingerprint,
   isDshAcpBootstrap,
   prepareDshNativeL0,
-  resolveDshL0DriftPrefix,
-  resolveDshNativeL0,
-  stripReservedDshArgs,
+  resolveDshInvocationLaunch,
 } = mod;
 
-const DSH_ARGS = ['C:/npm/node_modules/@deepseek-ai/dsh/bin/dsh.js', '--profile', 'acp'];
+const SCRIPT = 'C:/npm/node_modules/@deepseek-ai/dsh/bin/dsh.js';
+const DSH_ARGS = [SCRIPT, '--profile', 'acp'];
+const BASE_KEY = { projectPath: '/proj', providerProfile: 'dsh' };
 
 function withTmp(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-l0-test-'));
@@ -26,13 +28,18 @@ function withTmp(fn) {
 }
 
 describe('dsh-native-l0', () => {
-  it('detects DSH ACP bootstraps by binary name or package path, only in the acp profile', () => {
+  it('detects DSH ACP bootstraps only when the launcher region boots the acp profile', () => {
     assert.equal(isDshAcpBootstrap('dsh', ['--profile', 'acp']), true);
-    assert.equal(isDshAcpBootstrap('C:/bin/dsh.cmd', ['--profile', 'acp']), true);
+    assert.equal(isDshAcpBootstrap('C:/bin/dsh.cmd', ['acp']), true, 'positional profile expands to --profile');
     assert.equal(isDshAcpBootstrap('node', DSH_ARGS), true);
     assert.equal(isDshAcpBootstrap('dsh', ['--profile', 'chat']), false);
     assert.equal(isDshAcpBootstrap('opencode', ['acp']), false);
     assert.equal(isDshAcpBootstrap('node', ['kimi.js', '--profile', 'acp']), false);
+    // `--profile acp` after the launcher boundary is an app arg, not the launcher profile.
+    assert.equal(isDshAcpBootstrap('dsh', ['--', '--profile', 'acp']), false);
+    assert.equal(isDshAcpBootstrap('dsh', ['--log-level', 'info', '--profile', 'acp']), false);
+    assert.equal(isDshAcpBootstrap('dsh', ['--profile', 'acp', '--dump-config']), false);
+    assert.equal(isDshAcpBootstrap('dsh', ['plugin', '--profile', 'acp', 'add', 'x']), false);
   });
 
   it('builds a system-prompt patch that keeps DSH persona suffix', () => {
@@ -48,67 +55,112 @@ describe('dsh-native-l0', () => {
     assert.equal(buildDshL0PatchContent('path is {{cwd}}'), null);
   });
 
-  it('strips user-supplied --patch in both separated and = forms', () => {
-    assert.deepEqual(stripReservedDshArgs(['--profile', 'acp', '--patch', 'evil.json', '--patch=x.json', '-v']), [
-      '--profile',
-      'acp',
-      '-v',
-    ]);
-  });
+  it('inserts the host patch at the launcher boundary, before `--` and app args', () =>
+    withTmp((dir) => {
+      const plain = prepareDshNativeL0('dsh', 'node', DSH_ARGS, 'L0', dir);
+      assert.ok(plain);
+      assert.deepEqual(plain.args, [...DSH_ARGS, '--patch', plain.patchPath]);
+
+      const sep = prepareDshNativeL0('dsh', 'node', [...DSH_ARGS, '--', '--patch', 'app.json'], 'L0', dir);
+      assert.ok(sep);
+      assert.deepEqual(sep.args, [...DSH_ARGS, '--patch', sep.patchPath, '--', '--patch', 'app.json']);
+
+      const app = prepareDshNativeL0('dsh', 'node', [...DSH_ARGS, '--log-level', 'info'], 'L0', dir);
+      assert.ok(app);
+      assert.deepEqual(app.args, [...DSH_ARGS, '--patch', app.patchPath, '--log-level', 'info']);
+    }));
+
+  it('strips caller launcher --patch (both forms) but leaves app-region tokens untouched', () =>
+    withTmp((dir) => {
+      const args = ['--profile', 'acp', '--patch', 'evil.json', '--patch=x.json', '-v', '--patch', 'app.json'];
+      const b = prepareDshNativeL0('dsh', 'dsh', args, 'L0', dir);
+      assert.ok(b);
+      assert.deepEqual(b.args, ['--profile', 'acp', '--patch', b.patchPath, '-v', '--patch', 'app.json']);
+    }));
 
   it('is content addressed: same L0 → same patch path; changed L0 → new path', () =>
     withTmp((dir) => {
-      const a = prepareDshNativeL0('dsh', DSH_ARGS, 'L0 v1', dir);
-      const b = prepareDshNativeL0('dsh', DSH_ARGS, 'L0 v1', dir);
-      const c = prepareDshNativeL0('dsh', DSH_ARGS, 'L0 v2', dir);
+      const a = prepareDshNativeL0('dsh', 'node', DSH_ARGS, 'L0 v1', dir);
+      const b = prepareDshNativeL0('dsh', 'node', DSH_ARGS, 'L0 v1', dir);
+      const c = prepareDshNativeL0('dsh', 'node', DSH_ARGS, 'L0 v2', dir);
       assert.ok(a && b && c);
       assert.equal(a.patchPath, b.patchPath);
       assert.notEqual(a.patchPath, c.patchPath);
-      assert.deepEqual(a.args, [...DSH_ARGS, '--patch', a.patchPath]);
       assert.equal(a.fingerprint, computeDshL0Fingerprint('L0 v1'));
+      assert.equal(a.body, 'L0 v1');
       assert.match(readFileSync(a.patchPath, 'utf8'), /"personaPrefix": "L0 v1"/);
     }));
 
-  it('falls back to the prepend path (null) when compile fails or bootstrap is not DSH', async () => {
-    const errors = [];
-    const failed = await resolveDshNativeL0(
-      'dsh',
-      'node',
-      DSH_ARGS,
-      async () => {
-        throw new Error('compiler down');
-      },
-      (e) => errors.push(e),
-    );
-    assert.equal(failed, null);
-    assert.equal(errors.length, 1);
-    let called = false;
-    const notDsh = await resolveDshNativeL0('kimi', 'kimi', ['acp'], async () => {
-      called = true;
-      return 'x';
+  it('invocation launch compiles for the actual owner and scopes the pool by (owner, L0 revision)', () =>
+    withTmp(async (dir) => {
+      const seen = [];
+      const l0ByOwner = { alice: 'L0 alice', bob: 'L0 bob' };
+      const launcher = {
+        command: 'node',
+        baseArgs: DSH_ARGS,
+        patchDir: dir,
+        compile: async ({ catId, userId }) => {
+          seen.push({ catId, userId });
+          return l0ByOwner[userId];
+        },
+      };
+      const a = await resolveDshInvocationLaunch(launcher, BASE_KEY, 'dsh', 'alice');
+      const b = await resolveDshInvocationLaunch(launcher, BASE_KEY, 'dsh', 'bob');
+      assert.ok(a.ok && b.ok);
+      assert.deepEqual(seen, [
+        { catId: 'dsh', userId: 'alice' },
+        { catId: 'dsh', userId: 'bob' },
+      ]);
+      assert.notEqual(a.poolKey.nativeLaunch.scope, b.poolKey.nativeLaunch.scope);
+      assert.notDeepEqual(a.poolKey.nativeLaunch.args, b.poolKey.nativeLaunch.args);
+      assert.ok(!a.poolKey.nativeLaunch.scope.includes('alice'), 'scope must not leak the raw owner id');
+      assert.equal(a.poolKey.projectPath, BASE_KEY.projectPath);
+
+      l0ByOwner.alice = 'L0 alice v2';
+      const a2 = await resolveDshInvocationLaunch(launcher, BASE_KEY, 'dsh', 'alice');
+      assert.ok(a2.ok);
+      assert.notEqual(a2.poolKey.nativeLaunch.scope, a.poolKey.nativeLaunch.scope, 'drift → new process scope');
+    }));
+
+  it('fails closed without owner, on compile failure, or on an unsafe L0', async () => {
+    const launcher = (compile) => ({ command: 'node', baseArgs: DSH_ARGS, compile });
+    const ok = launcher(async () => 'L0');
+    assert.deepEqual(await resolveDshInvocationLaunch(ok, BASE_KEY, 'dsh', undefined), {
+      ok: false,
+      reason: 'owner_missing',
     });
-    assert.equal(notDsh, null);
-    assert.equal(called, false, 'non-DSH members must not trigger an L0 compile');
+    assert.equal((await resolveDshInvocationLaunch(ok, BASE_KEY, 'dsh', '  ')).ok, false);
+    const boom = await resolveDshInvocationLaunch(
+      launcher(async () => {
+        throw new Error('compiler down');
+      }),
+      BASE_KEY,
+      'dsh',
+      'alice',
+    );
+    assert.equal(boom.ok, false);
+    assert.equal(boom.reason, 'compile_failed');
+    const unsafe = await resolveDshInvocationLaunch(
+      launcher(async () => 'x {{cwd}}'),
+      BASE_KEY,
+      'dsh',
+      'alice',
+    );
+    assert.equal(unsafe.ok, false);
+    assert.equal(unsafe.reason, 'patch_unavailable');
   });
 
-  it('drift check: current L0 → no prefix; changed L0 → current L0 prefix; compile error → keep spawn L0', async () => {
-    const guard = (l0) => ({ fingerprint: computeDshL0Fingerprint('L0 v1'), compile: async () => l0 });
-    assert.equal(await resolveDshL0DriftPrefix(guard('L0 v1'), 'dsh', 'u1'), undefined);
-
-    const reasons = [];
-    const prefix = await resolveDshL0DriftPrefix(guard('L0 v2'), 'dsh', 'u1', (r) => reasons.push(r));
-    assert.equal(prefix, 'L0 v2');
-
-    let seenUser;
-    const failing = {
-      fingerprint: 'x',
-      compile: async (opts) => {
-        seenUser = opts.userId;
-        throw new Error('boom');
-      },
-    };
-    assert.equal(await resolveDshL0DriftPrefix(failing, 'dsh', 'u9', (r) => reasons.push(r)), undefined);
-    assert.equal(seenUser, 'u9');
-    assert.deepEqual(reasons, ['stale', 'compile_failed']);
-  });
+  it('native instructions carry the exact L0 body plus patch binding evidence', () =>
+    withTmp((dir) => {
+      const binding = prepareDshNativeL0('dsh', 'node', DSH_ARGS, '  L0 body  ', dir);
+      assert.ok(binding);
+      const [instruction, ...rest] = buildDshNativeInstructions(binding);
+      assert.equal(rest.length, 0);
+      assert.equal(instruction.body, 'L0 body');
+      assert.equal(instruction.injectionDecision, DSH_NATIVE_L0_INJECTION_DECISION);
+      assert.deepEqual(
+        instruction.sourceRefs.map((r) => r.ref),
+        ['registry:cat-cafe-owned', `dsh-launcher-patch:l0-sha256:${binding.fingerprint}`],
+      );
+    }));
 });

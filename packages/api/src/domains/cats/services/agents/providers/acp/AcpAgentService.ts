@@ -46,7 +46,7 @@ import {
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
-import { type DshNativeL0Guard, resolveDshL0DriftPrefix } from './dsh-native-l0.js';
+import { type DshNativeInstruction, type DshNativeL0Launcher, resolveDshInvocationLaunch } from './dsh-native-l0.js';
 import type { AcpMcpServer, AcpNewSessionResult, AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-agent');
@@ -151,8 +151,11 @@ export interface AcpAgentServiceConfig {
    * typical agent-internal turns like background-task completion steers).
    */
   agentBusyRetryDelaysMs?: number[];
-  /** DSH: L0 bound into the process at spawn (`--patch`); enables native-L0 routing. */
-  nativeL0?: DshNativeL0Guard;
+  /**
+   * DSH: every invocation compiles the owner's L0 and runs on an (owner, L0
+   * revision)-scoped process launched with `--patch`; enables native-L0 routing.
+   */
+  nativeL0Launcher?: DshNativeL0Launcher;
 }
 
 /** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
@@ -182,7 +185,7 @@ export class AcpAgentService implements AgentService {
   private readonly agentBusyRetryDelaysMs: number[];
   /** Becomes true only after this concrete ACP service observes usable standard usage telemetry. */
   private observedUsageUpdate = false;
-  private readonly nativeL0?: DshNativeL0Guard;
+  private readonly nativeL0Launcher?: DshNativeL0Launcher;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -198,12 +201,15 @@ export class AcpAgentService implements AgentService {
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
-    this.nativeL0 = config.nativeL0;
+    this.nativeL0Launcher = config.nativeL0Launcher;
   }
 
-  /** True only when the spawned process carries the compiled L0 (DSH `--patch`). */
+  /**
+   * True when every launch carries the owner's current L0 natively (DSH `--patch`).
+   * Invocations that cannot bind it fail closed; they never run identity-less.
+   */
   injectsL0Natively(): boolean {
-    return this.nativeL0 !== undefined;
+    return this.nativeL0Launcher !== undefined;
   }
 
   contextCapability(): import('../../../types.js').AgentContextCapability {
@@ -309,9 +315,37 @@ export class AcpAgentService implements AgentService {
       return;
     }
 
+    // DSH native L0: bind this invocation to the owner's current L0 process, or fail closed.
+    let poolKey = this.poolKey;
+    let nativeInstructions: readonly DshNativeInstruction[] = Object.freeze([]);
+    if (this.nativeL0Launcher) {
+      const launch = await resolveDshInvocationLaunch(
+        this.nativeL0Launcher,
+        this.poolKey,
+        this.catId as string,
+        options?.callbackEnv?.CAT_CAFE_USER_ID,
+      );
+      if (!launch.ok) {
+        const detail = launch.error instanceof Error ? launch.error.message : undefined;
+        log.error({ ...ctx, reason: launch.reason, err: detail }, 'ACP DSH: native L0 unavailable; failing closed');
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: `native_l0_unavailable: ${launch.reason}`,
+          errorCode: 'native_l0_unavailable',
+          metadata,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+      poolKey = launch.poolKey;
+      nativeInstructions = launch.nativeInstructions;
+    }
+
     let lease: AcpLease | null = null;
     try {
-      lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
+      lease = await this.pool.acquire(poolKey, { sessionId: options?.sessionId });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error({ ...ctx, err: errMsg }, 'ACP init failure');
@@ -351,7 +385,7 @@ export class AcpAgentService implements AgentService {
       if (promptPhase !== 'active_unacknowledged') return false;
       promptPhase = 'locally_terminated_unacknowledged';
       const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
-      for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
+      for (const id of sessionIds) this.pool.sealSession?.(poolKey, id);
       return true;
     };
     const cancelActivePromptSession = (activeSessionId: string): boolean => {
@@ -490,8 +524,8 @@ export class AcpAgentService implements AgentService {
           );
           const session = await client.loadSession(resumeSessionId, cwd, resumeConfig.mcpServers);
           sessionId = session.sessionId || resumeSessionId;
-          this.pool.rememberSession?.(this.poolKey, sessionId, lease);
-          if (sessionId !== resumeSessionId) this.pool.rememberSession?.(this.poolKey, resumeSessionId, lease);
+          this.pool.rememberSession?.(poolKey, sessionId, lease);
+          if (sessionId !== resumeSessionId) this.pool.rememberSession?.(poolKey, resumeSessionId, lease);
           if (resumeCreds) {
             writeSessionCredentialFile(options?.callbackEnv, resumeCreds.path);
             bindSessionCredentialFile(sessionId, resumeCreds.path);
@@ -523,7 +557,7 @@ export class AcpAgentService implements AgentService {
         );
         const session = await client.newSession(cwd, sessionMcpServers);
         sessionId = session.sessionId;
-        this.pool.rememberSession?.(this.poolKey, sessionId, lease);
+        this.pool.rememberSession?.(poolKey, sessionId, lease);
         if (freshCreds) bindSessionCredentialFile(sessionId, freshCreds.path);
         metadata.sessionId = sessionId;
         log.info({ ...ctx, sessionId }, 'ACP newSession completed');
@@ -583,21 +617,7 @@ export class AcpAgentService implements AgentService {
       const restoresResumeIdentity = resumeDisposition === 'load_failed_fresh' || resumeDisposition === 'sealed_fresh';
       const fallbackSystemPrompt =
         restoresResumeIdentity && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
-      // DSH: if the owner's L0 drifted since spawn, the frozen process L0 is stale
-      // and the route layer only sent pack-only identity — carry current L0 inline.
-      const l0DriftPrefix = this.nativeL0
-        ? await resolveDshL0DriftPrefix(
-            this.nativeL0,
-            this.catId as string,
-            options?.callbackEnv?.CAT_CAFE_USER_ID,
-            (reason, error) =>
-              log.warn(
-                { ...ctx, reason, error: error instanceof Error ? error.message : undefined },
-                'ACP DSH: spawn-time L0 not current; handling drift',
-              ),
-          )
-        : undefined;
-      const promptBody = l0DriftPrefix ? `${l0DriftPrefix}\n\n${prompt}` : prompt;
+      const promptBody = prompt;
       const effectivePrompt = options?.systemPrompt
         ? `${options.systemPrompt}\n\n${promptBody}`
         : fallbackSystemPrompt
@@ -625,7 +645,7 @@ export class AcpAgentService implements AgentService {
             v: 1,
             ...(busyAttempt > 0 ? { boundaryReason: 'provider_busy' as const } : {}),
             message: Object.freeze({ body: effectivePrompt }),
-            nativeInstructions: Object.freeze([]),
+            nativeInstructions,
             runtime: Object.freeze({
               provider: this.providerName,
               carrier: 'acp',
@@ -753,7 +773,7 @@ export class AcpAgentService implements AgentService {
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           const freshSessionId = freshSession.sessionId;
-          this.pool.rememberSession?.(this.poolKey, freshSessionId, lease);
+          this.pool.rememberSession?.(poolKey, freshSessionId, lease);
           // Replacement retry is a NEW ACP session, so it must get a fresh
           // credential file path. Reusing the failed resume path would let the
           // dead session read future replacement-session credentials.
@@ -823,7 +843,7 @@ export class AcpAgentService implements AgentService {
                   v: 1,
                   boundaryReason: busyAttempt > 0 ? 'provider_busy' : 'missing_session',
                   message: Object.freeze({ body: retryPrompt }),
-                  nativeInstructions: Object.freeze([]),
+                  nativeInstructions,
                   runtime: Object.freeze({
                     provider: this.providerName,
                     carrier: 'acp',

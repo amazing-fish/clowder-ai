@@ -4,43 +4,46 @@
  * DeepSeek Harness (`@deepseek-ai/dsh`, `--profile acp`) assembles its own
  * system prompt from the `system-prompt` plugin (`personaPrefix` /
  * `personaSuffix`). Its ACP surface has no per-turn system-instruction field,
- * but the CLI accepts `--patch <file>` which overrides plugin config at spawn
- * (verified against the installed dsh via `--dump-config`, 2026-09-30).
+ * but the launcher accepts `--patch <file>` which overrides plugin config at
+ * spawn (verified against the installed dsh via `--dump-config`, 2026-09-30).
  *
- * We therefore compile the per-cat L0 once at pool spawn, write it into a
- * content-addressed patch file, and append `--patch <file>` to the startup
- * args. Because the path embeds the L0 hash, any L0 change changes the args,
- * which changes the pool spawn signature and retires the old process on the
- * next registry sync — no hidden mutable prompt state.
+ * The L0 is owner-scoped (it embeds the owner's profile capsule), and one DSH
+ * process serves every multiplexed session, so the L0 is bound per invocation:
+ *  1. compile the L0 for the invocation owner (never the process default user);
+ *  2. write it into a content-addressed patch file;
+ *  3. acquire from a pool key scoped by (owner, L0 fingerprint) whose spawn args
+ *     carry that patch inside the proven launcher region.
+ * A different owner or a changed L0 therefore lands on a different process;
+ * nothing ever reuses another owner's or a stale system prompt. Anything that
+ * cannot be proven (no owner, compile failure, unsafe L0) fails closed.
  *
  * Constraints (verified):
  *  - The patch REPLACES the plugin `config` object, so `personaSuffix` must be
  *    carried explicitly or DSH loses its cwd line.
  *  - DSH interpolates `{{name}}` in persona text with no escape syntax. An L0
- *    containing `{{` would be silently rewritten, so we refuse the native
- *    channel for it (fail closed to the user-prompt prepend path).
- *  - One process serves every multiplexed session, so the L0 is per pool
- *    (owner-scoped), not per invocation.
+ *    containing `{{` would be silently rewritten, so it is refused.
+ *  - `--patch` after the launcher region reaches the app, not the launcher
+ *    (see dsh-launcher-args.ts), so it is inserted only inside that region.
  */
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
+import type { RequestGenerationSourceRef } from '@cat-cafe/shared';
+import { CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF } from '../../../session/request-generation-source-policy.js';
+import type { PoolKey } from './AcpProcessPool.js';
+import { insertIntoDshLauncherRegion, locateDshLauncherRegion } from './dsh-launcher-args.js';
 
 export const DSH_PATCH_FLAG = '--patch';
 /** DSH's default suffix; must be re-supplied because the patch replaces `config`. */
 export const DSH_DEFAULT_PERSONA_SUFFIX = 'Your working directory is {{cwd}}.';
+/** F299 injection decision recorded for the patch-carried L0. */
+export const DSH_NATIVE_L0_INJECTION_DECISION = 'dsh_launcher_patch_persona_prefix';
 
-const DSH_PACKAGE_MARKER = /[\\/]@deepseek-ai[\\/]dsh[\\/]/i;
-
-/** True when the ACP bootstrap launches the DSH CLI in its ACP profile. */
+/** True only when the bootstrap provably boots the DSH launcher with `--profile acp`. */
 export function isDshAcpBootstrap(command: string, args: readonly string[]): boolean {
-  const launchesDsh =
-    /^dsh(\.cmd|\.exe)?$/i.test(basename(command)) || args.some((arg) => DSH_PACKAGE_MARKER.test(arg));
-  if (!launchesDsh) return false;
-  const profileIdx = args.indexOf('--profile');
-  return profileIdx >= 0 && args[profileIdx + 1] === 'acp';
+  return locateDshLauncherRegion(command, args) !== null;
 }
 
 export function computeDshL0Fingerprint(l0: string): string {
@@ -58,110 +61,126 @@ export function buildDshL0PatchContent(l0: string): string | null {
   )}\n`;
 }
 
-/** Content-addressed write: same L0 → same path → same spawn signature. */
+/** Content-addressed write: same L0 → same path → same spawn args. Owner-private (0600). */
 export function writeDshL0PatchFile(catId: string, content: string, baseDir: string = tmpdir()): string {
   const dir = join(baseDir, 'cat-cafe-dsh-l0');
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const safeCat = catId.replace(/[^a-zA-Z0-9_-]+/g, '-') || 'cat';
   const hash = createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
   const path = join(dir, `${safeCat}-${hash}.json`);
-  writeFileSync(path, content, 'utf8');
+  writeFileSync(path, content, { encoding: 'utf8', mode: 0o600 });
   return path;
 }
 
-/**
- * `--patch` is server-owned for DSH members: a user-supplied patch could
- * override `system-prompt` and silently defeat the L0 guarantee.
- */
-export function stripReservedDshArgs(args: readonly string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === undefined) continue;
-    if (arg === DSH_PATCH_FLAG) {
-      i++;
-      continue;
-    }
-    if (arg.startsWith(`${DSH_PATCH_FLAG}=`)) continue;
-    out.push(arg);
-  }
-  return out;
-}
-
 export interface DshNativeL0Binding {
+  /** Full spawn args with `--patch <file>` inside the launcher region. */
   args: string[];
   fingerprint: string;
   patchPath: string;
+  /** The exact persona prefix the patch carries (trimmed L0). */
+  body: string;
 }
 
-export type DshL0Compiler = (options: { catId: string; userId?: string }) => Promise<string>;
-
-/**
- * Spawn-time resolution used by the ACP factory. Any compile failure keeps the
- * legacy prepend path (the route layer then sends the full identity in-prompt),
- * so a broken compiler can never produce an identity-less DSH cat.
- */
-export async function resolveDshNativeL0(
-  catId: string,
-  command: string,
-  args: readonly string[],
-  compile: DshL0Compiler,
-  onError?: (error: unknown) => void,
-): Promise<DshNativeL0Binding | null> {
-  if (!isDshAcpBootstrap(command, args)) return null;
-  try {
-    return prepareDshNativeL0(catId, args, await compile({ catId }));
-  } catch (error) {
-    onError?.(error);
-    return null;
-  }
-}
-
-/** What the ACP service needs to keep the spawn-time L0 honest per invocation. */
-export interface DshNativeL0Guard {
-  fingerprint: string;
-  compile: DshL0Compiler;
-}
-
-/**
- * Invoke-time drift check. The route layer sends pack-only identity whenever
- * `injectsL0Natively()` is true, so if the L0 compiled NOW (for this owner)
- * differs from the one frozen into the process at spawn, the frozen one is
- * stale and the current L0 must travel in the user prompt instead.
- * Returns the L0 to prepend, or undefined when the spawn-time L0 is current
- * (or unverifiable — a compile error keeps the spawn-time L0, never none).
- */
-export async function resolveDshL0DriftPrefix(
-  guard: DshNativeL0Guard,
-  catId: string,
-  userId: string | undefined,
-  onDrift?: (reason: 'stale' | 'compile_failed', error?: unknown) => void,
-): Promise<string | undefined> {
-  let current: string;
-  try {
-    current = await guard.compile({ catId, ...(userId ? { userId } : {}) });
-  } catch (error) {
-    onDrift?.('compile_failed', error);
-    return undefined;
-  }
-  if (computeDshL0Fingerprint(current) === guard.fingerprint) return undefined;
-  onDrift?.('stale');
-  return current.trim() || undefined;
-}
-
-/** Compose the final startup args for a DSH member, or null to keep the prepend path. */
+/** Compose spawn args for a DSH member, or null when native L0 cannot be proven. */
 export function prepareDshNativeL0(
   catId: string,
+  command: string,
   args: readonly string[],
   l0: string,
   baseDir?: string,
 ): DshNativeL0Binding | null {
+  const region = locateDshLauncherRegion(command, args);
+  if (!region) return null;
   const content = buildDshL0PatchContent(l0);
   if (!content) return null;
   const patchPath = writeDshL0PatchFile(catId, content, baseDir);
   return {
-    args: [...stripReservedDshArgs(args), DSH_PATCH_FLAG, patchPath],
+    args: insertIntoDshLauncherRegion(args, region, [DSH_PATCH_FLAG, patchPath]),
     fingerprint: computeDshL0Fingerprint(l0),
     patchPath,
+    body: l0.trim(),
+  };
+}
+
+export type DshL0Compiler = (options: { catId: string; userId?: string }) => Promise<string>;
+
+/** Factory → service contract: how to launch an owner-bound DSH process. */
+export interface DshNativeL0Launcher {
+  command: string;
+  /** Registry bootstrap args (without any host patch). */
+  baseArgs: readonly string[];
+  compile: DshL0Compiler;
+  patchDir?: string;
+}
+
+export type DshNativeLaunchResult =
+  | { ok: true; binding: DshNativeL0Binding; nativeScope: string }
+  | { ok: false; reason: 'owner_missing' | 'compile_failed' | 'patch_unavailable'; error?: unknown };
+
+/**
+ * Pool scope = hash(owner, L0 fingerprint). Hashed so pool-key logs never carry
+ * the raw owner id; distinct owners or revisions can never share a process.
+ */
+export function computeDshNativeScope(userId: string, fingerprint: string): string {
+  return createHash('sha256').update(`${userId}\0${fingerprint}`, 'utf8').digest('hex').slice(0, 32);
+}
+
+/** Invoke-time resolution. Every non-provable case is a typed failure (fail closed). */
+export async function resolveDshNativeLaunch(
+  launcher: DshNativeL0Launcher,
+  catId: string,
+  userId: string | undefined,
+): Promise<DshNativeLaunchResult> {
+  const owner = userId?.trim();
+  if (!owner) return { ok: false, reason: 'owner_missing' };
+  let l0: string;
+  try {
+    l0 = await launcher.compile({ catId, userId: owner });
+  } catch (error) {
+    return { ok: false, reason: 'compile_failed', error };
+  }
+  const binding = prepareDshNativeL0(catId, launcher.command, launcher.baseArgs, l0, launcher.patchDir);
+  if (!binding) return { ok: false, reason: 'patch_unavailable' };
+  return { ok: true, binding, nativeScope: computeDshNativeScope(owner, binding.fingerprint) };
+}
+
+export interface DshNativeInstruction {
+  body: string;
+  sourceRefs: readonly RequestGenerationSourceRef[];
+  injectionDecision: string;
+}
+
+/** F299 native channel for the patch-carried L0: exact body + patch binding evidence. */
+export function buildDshNativeInstructions(binding: DshNativeL0Binding): readonly DshNativeInstruction[] {
+  return Object.freeze([
+    Object.freeze({
+      body: binding.body,
+      sourceRefs: Object.freeze([
+        Object.freeze({ owner: 'system_prompt' as const, ref: CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF }),
+        Object.freeze({ owner: 'system_prompt' as const, ref: `dsh-launcher-patch:l0-sha256:${binding.fingerprint}` }),
+      ]),
+      injectionDecision: DSH_NATIVE_L0_INJECTION_DECISION,
+    }),
+  ]);
+}
+
+export type DshInvocationLaunch =
+  | { ok: true; poolKey: PoolKey; nativeInstructions: readonly DshNativeInstruction[]; fingerprint: string }
+  | { ok: false; reason: 'owner_missing' | 'compile_failed' | 'patch_unavailable'; error?: unknown };
+
+/** Service seam: owner-bound pool key + the native instructions that key's process carries. */
+export async function resolveDshInvocationLaunch(
+  launcher: DshNativeL0Launcher,
+  basePoolKey: PoolKey,
+  catId: string,
+  userId: string | undefined,
+): Promise<DshInvocationLaunch> {
+  const launch = await resolveDshNativeLaunch(launcher, catId, userId);
+  if (!launch.ok) return launch;
+  return {
+    ok: true,
+    poolKey: { ...basePoolKey, nativeLaunch: { scope: launch.nativeScope, args: launch.binding.args } },
+    nativeInstructions: buildDshNativeInstructions(launch.binding),
+    fingerprint: launch.binding.fingerprint,
   };
 }

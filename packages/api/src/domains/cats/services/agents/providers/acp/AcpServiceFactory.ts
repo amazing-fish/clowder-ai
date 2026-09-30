@@ -25,7 +25,7 @@ import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstra
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
 import { skipAcpProfile } from './acp-registration-failure.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
-import { type DshL0Compiler, resolveDshNativeL0 } from './dsh-native-l0.js';
+import { type DshL0Compiler, type DshNativeL0Launcher, isDshAcpBootstrap } from './dsh-native-l0.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 
@@ -233,10 +233,11 @@ async function ensureAcpPool(
       healthCheckIntervalMs: 30_000,
     },
     acpConfig,
-    () => {
+    (poolKey) => {
       const clientCfg = {
         command: bootstrap.command,
-        args: bootstrap.args,
+        // Scoped keys (DSH native L0) carry their own proven launcher args.
+        args: poolKey?.nativeLaunch ? [...poolKey.nativeLaunch.args] : bootstrap.args,
         cwd: bootstrap.cwd,
         ...(spawn.env ? { env: spawn.env } : {}),
       };
@@ -303,19 +304,17 @@ export async function createAcpServiceForConfig(
   }
   const spawn = await prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext);
   if (!spawn) return null;
-  // DSH native L0: the content-addressed --patch path lands in bootstrap.args, so an
-  // L0 change changes the spawn signature and retires the old pool on next sync.
-  const l0CompilerFn = input.l0CompilerFn ?? compileL0ViaSubprocess;
-  const dshL0 = await resolveDshNativeL0(catId, bootstrap.command, bootstrap.args, l0CompilerFn, (error) =>
-    input.log.warn(
-      { catId, profileId, error: error instanceof Error ? error.message : String(error) },
-      'ACP DSH: native L0 compile failed; keeping user-prompt identity prepend',
-    ),
-  );
-  if (dshL0) {
-    bootstrap.args = dshL0.args;
-    input.log.info({ catId, profileId, fingerprint: dshL0.fingerprint.slice(0, 12) }, 'ACP DSH: bound native L0 patch');
-  }
+  // DSH native L0: eligibility only. The L0 is compiled per invocation for the
+  // actual owner and bound into an (owner, L0 revision)-scoped process by
+  // AcpAgentService; nothing owner-specific is frozen into the registry pool.
+  const dshL0Launcher: DshNativeL0Launcher | undefined = isDshAcpBootstrap(bootstrap.command, bootstrap.args)
+    ? {
+        command: bootstrap.command,
+        baseArgs: [...bootstrap.args],
+        compile: input.l0CompilerFn ?? compileL0ViaSubprocess,
+      }
+    : undefined;
+  if (dshL0Launcher) input.log.info({ catId, profileId }, 'ACP DSH: owner-scoped native L0 launch enabled');
   const pool = await ensureAcpPool(effectiveInput, bootstrap, spawn);
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
@@ -340,6 +339,6 @@ export async function createAcpServiceForConfig(
     // #1186: Thread the member's configured idle TTL to AcpAgentService so
     // promptStream uses it as the authoritative no-event termination threshold.
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
-    ...(dshL0 ? { nativeL0: { fingerprint: dshL0.fingerprint, compile: l0CompilerFn } } : {}),
+    ...(dshL0Launcher ? { nativeL0Launcher: dshL0Launcher } : {}),
   });
 }
