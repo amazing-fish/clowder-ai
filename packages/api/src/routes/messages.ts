@@ -2610,7 +2610,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       let activeDrafts = drafts;
       // #80 fix-B diagnostic: trace draft merge for F5 recovery verification
       if (drafts.length > 0) {
-        request.log.info(
+        request.log.debug(
           { threadId: resolvedThreadId, draftCount: drafts.length, draftIds: drafts.map((d) => d.invocationId) },
           '#80 draft merge: found active drafts',
         );
@@ -2723,7 +2723,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // P2: stable sort by updatedAt for parallel multi-cat drafts
       activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
       if (activeDrafts.length > 0) {
-        request.log.info(
+        request.log.debug(
           { threadId: resolvedThreadId, mergedCount: activeDrafts.length, cats: activeDrafts.map((d) => d.catId) },
           '#80 draft merge: merging drafts into response',
         );

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
 
 const { registerActiveExecutionRoutes } = await import('../dist/routes/active-execution-routes.js');
+const { customLevels, MEASURE_LEVEL } = await import('../dist/infrastructure/log-levels.js');
 
 const USER_ID = 'user-a';
 
@@ -72,9 +73,11 @@ describe('F295 user/project active execution resource', () => {
   it('emits queryable stage traces without encoding a latency threshold', async () => {
     await app.close();
     const records = [];
+    // File-target view: the production logger keeps `measure` records on disk.
     app = Fastify({
       logger: {
-        level: 'info',
+        level: 'measure',
+        customLevels,
         stream: { write: (line) => records.push(JSON.parse(line)) },
       },
     });
@@ -84,10 +87,25 @@ describe('F295 user/project active execution resource', () => {
     const response = await inject(app, '/project/cafe');
 
     assert.equal(response.statusCode, 200);
-    const stages = records
-      .filter((record) => record.measurement === 'active_execution_projection')
-      .map((record) => record.stage);
-    assert.deepEqual(stages, ['candidate_enumeration', 'owner_truth', 'classification_assembly', 'total']);
+    const traces = records.filter((record) => record.measurement === 'active_execution_projection');
+    assert.deepEqual(
+      traces.map((record) => record.stage),
+      ['candidate_enumeration', 'owner_truth', 'classification_assembly', 'total'],
+    );
+    assert.ok(traces.every((record) => record.level === MEASURE_LEVEL));
+  });
+
+  it('keeps projection measurements out of an info-level terminal stream', async () => {
+    await app.close();
+    const records = [];
+    app = Fastify({
+      logger: { level: 'info', customLevels, stream: { write: (line) => records.push(JSON.parse(line)) } },
+      disableRequestLogging: true,
+    });
+    registerActiveExecutionRoutes(app, deps);
+    await app.ready();
+    assert.equal((await inject(app, '/project/cafe')).statusCode, 200);
+    assert.equal(records.filter((record) => record.measurement === 'active_execution_projection').length, 0);
   });
 
   it('single-flights concurrent callers for the same user and project', async () => {

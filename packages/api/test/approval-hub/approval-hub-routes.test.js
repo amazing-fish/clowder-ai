@@ -203,9 +203,12 @@ describe('F246 approval fan-out telemetry and failure policy', () => {
   async function buildApp(adapters) {
     const { approvalHubRoutes } = await import('../../dist/routes/approval-hub-routes.js');
     logs = [];
+    const { customLevels } = await import('../../dist/infrastructure/log-levels.js');
     app = Fastify({
       logger: {
-        level: 'info',
+        // File-target view: success measurements are `measure` (25), failures stay `error`.
+        level: 'measure',
+        customLevels,
         stream: {
           write(line) {
             logs.push(JSON.parse(line));

@@ -216,7 +216,7 @@ export class SocketManager {
 
       socket.on('leave_room', (room: string) => {
         socket.leave(room);
-        log.info({ socketId: socket.id, room }, 'Left room');
+        log.debug({ socketId: socket.id, room }, 'Left room');
       });
 
       const seenCancelActionIds = new Set<string>();

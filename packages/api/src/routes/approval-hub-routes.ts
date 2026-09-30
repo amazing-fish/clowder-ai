@@ -15,6 +15,7 @@ import { performance } from 'node:perf_hooks';
 import type { ApprovalProducerId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import type { ApprovalProducerRegistry } from '../domains/approval-hub/ApprovalProducerRegistry.js';
+import { logMeasurement } from '../infrastructure/log-levels.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 const MAX_SETTLED_LIMIT = 200;
@@ -46,7 +47,8 @@ async function measuredFanOut<T>(
       const adapterStartedAt = performance.now();
       try {
         const items = await run();
-        log.info(
+        logMeasurement(
+          log,
           {
             feature: 'F246',
             measurement: 'approval_hub_fanout',
@@ -82,20 +84,19 @@ async function measuredFanOut<T>(
 
   const items = outcomes.flatMap((outcome) => (outcome.ok ? outcome.items : []));
   const failure = outcomes.find((outcome) => !outcome.ok);
-  log[failure ? 'error' : 'info'](
-    {
-      ...(failure && !failure.ok ? { err: failure.error } : {}),
-      feature: 'F246',
-      measurement: 'approval_hub_fanout',
-      query,
-      scope: 'total',
-      producerId: 'all',
-      durationMs: elapsedMs(totalStartedAt),
-      itemCount: items.length,
-      outcome: failure ? 'error' : 'success',
-    },
-    failure ? '[F246] approval hub fan-out failed closed' : '[F246] approval hub fan-out completed',
-  );
+  const totalFields = {
+    ...(failure && !failure.ok ? { err: failure.error } : {}),
+    feature: 'F246',
+    measurement: 'approval_hub_fanout',
+    query,
+    scope: 'total',
+    producerId: 'all',
+    durationMs: elapsedMs(totalStartedAt),
+    itemCount: items.length,
+    outcome: failure ? 'error' : 'success',
+  };
+  if (failure) log.error(totalFields, '[F246] approval hub fan-out failed closed');
+  else logMeasurement(log, totalFields, '[F246] approval hub fan-out completed');
   if (failure && !failure.ok) throw failure.error;
   return items;
 }

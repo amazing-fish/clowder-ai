@@ -6306,6 +6306,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   app.post(
     '/api/callbacks/refresh-token',
     {
+      // Per-invocation token heartbeat: quiet unless it fails or is slow.
+      config: { routineWrite: true },
       preValidation: async (request, reply) => {
         // Cloud Codex P1 + gpt52 P1 #2/#3 (#1368): cooldown must mirror auth
         // — same creds extraction rule as preHandler, then peek (no-slide)

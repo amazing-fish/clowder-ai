@@ -13,13 +13,16 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { format as utilFormat } from 'node:util';
 import pino from 'pino';
+import { customLevels, MEASURE_LEVEL_NAME, resolveLogTargetLevels, TRANSPORT_LEVELS } from './log-levels.js';
 
 /**
  * --debug CLI flag: `node dist/index.js --debug` sets log level to 'debug'.
  * Precedence: --debug flag > LOG_LEVEL env var > default 'info'.
  */
 export const isDebugMode = process.argv.includes('--debug');
-const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
+const LOG_LEVEL = isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info');
+/** Terminal filters at LOG_LEVEL; the rolling file also keeps `measure` traces (see log-levels.ts). */
+const TARGET_LEVELS = resolveLogTargetLevels(LOG_LEVEL);
 const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
 const RETENTION_FILES = 14;
 
@@ -57,11 +60,12 @@ const stream =
         { level: 'trace', stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true }) },
       ])
     : pino.transport({
+        levels: TRANSPORT_LEVELS,
         targets: [
           {
             target: 'pino/file',
             options: { destination: 1 },
-            level: 'trace',
+            level: TARGET_LEVELS.stdout,
           },
           {
             target: 'pino-roll',
@@ -72,14 +76,17 @@ const stream =
               limit: { count: RETENTION_FILES },
               mkdir: true,
             },
-            level: 'trace',
+            level: TARGET_LEVELS.file,
           },
         ],
       });
 
-export const logger = pino(
+export type AppLogger = pino.Logger<typeof MEASURE_LEVEL_NAME>;
+
+export const logger: AppLogger = pino(
   {
-    level: LOG_LEVEL,
+    level: TARGET_LEVELS.logger,
+    customLevels,
     timestamp: () => `,"time":"${new Date().toISOString()}"`,
     redact: {
       paths: REDACT_PATHS,
@@ -89,7 +96,7 @@ export const logger = pino(
   stream,
 );
 
-export function createModuleLogger(module: string): pino.Logger {
+export function createModuleLogger(module: string): AppLogger {
   return logger.child({ module });
 }
 

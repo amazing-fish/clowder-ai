@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { logMeasurement } from '../infrastructure/log-levels.js';
 
 function elapsedMs(startedAt: number): number {
   return Math.round((performance.now() - startedAt) * 1_000) / 1_000;
@@ -30,7 +31,8 @@ function traceSidebarSnapshotStage(
     serializedBytes?: number;
   },
 ): void {
-  request.log.info(
+  logMeasurement(
+    request.log,
     {
       feature: 'F297',
       measurement: 'sidebar_snapshot',

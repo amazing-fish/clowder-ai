@@ -8,6 +8,7 @@ import {
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
 import { resolveThreadAccess, threadAccessDeniedBody } from '../domains/cats/services/session/thread-access-policy.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { logMeasurement } from '../infrastructure/log-levels.js';
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -78,7 +79,8 @@ function traceActiveProjectionStage(
   durationMs: number,
   counts: { threadCount?: number; scanTargetCount?: number; executionCount?: number } = {},
 ): void {
-  request.log.info(
+  logMeasurement(
+    request.log,
     {
       feature: 'F295',
       measurement: 'active_execution_projection',

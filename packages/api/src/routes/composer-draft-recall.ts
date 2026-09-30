@@ -41,24 +41,29 @@ export const composerDraftRecallRoutes: FastifyPluginAsync<ComposerDraftRecallRo
     return { draft, revision: draft?.revision ?? 0 };
   });
 
-  app.put<{ Params: { threadId: string } }>('/api/threads/:threadId/composer-draft', async (request, reply) => {
-    const ownerUserId = requireStrictOwner(request, reply);
-    if (!ownerUserId) return { error: 'Authentication required', code: 'AUTH_REQUIRED' };
-    const parsed = composerDraftPutSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-    const result = await opts.messageStore.putOwnerComposerDraft(ownerUserId, request.params.threadId, {
-      ...parsed.data,
-      updatedAt: Date.now(),
-    });
-    if (result.kind === 'revision_mismatch') {
-      reply.status(409);
-      return { code: 'DRAFT_REVISION_MISMATCH', actualRevision: result.actualRevision };
-    }
-    return { draft: result.draft };
-  });
+  // Autosave on typing: quiet unless it fails or is slow.
+  app.put<{ Params: { threadId: string } }>(
+    '/api/threads/:threadId/composer-draft',
+    { config: { routineWrite: true } },
+    async (request, reply) => {
+      const ownerUserId = requireStrictOwner(request, reply);
+      if (!ownerUserId) return { error: 'Authentication required', code: 'AUTH_REQUIRED' };
+      const parsed = composerDraftPutSchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Invalid request body', details: parsed.error.issues };
+      }
+      const result = await opts.messageStore.putOwnerComposerDraft(ownerUserId, request.params.threadId, {
+        ...parsed.data,
+        updatedAt: Date.now(),
+      });
+      if (result.kind === 'revision_mismatch') {
+        reply.status(409);
+        return { code: 'DRAFT_REVISION_MISMATCH', actualRevision: result.actualRevision };
+      }
+      return { draft: result.draft };
+    },
+  );
 
   app.delete<{ Params: { threadId: string } }>('/api/threads/:threadId/composer-draft', async (request, reply) => {
     const ownerUserId = requireStrictOwner(request, reply);

@@ -17,16 +17,35 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export type RequestLogLevel = 'info' | 'debug';
 
-export function resolveRequestLogLevel(method: string, statusCode: number, elapsedMs: number): RequestLogLevel {
+/**
+ * @param routineWrite route opted in via `config: { routineWrite: true }` —
+ *   high-frequency autosave/heartbeat writes (draft save, read marker, token refresh)
+ *   that are quiet like polling when they succeed fast.
+ */
+export function resolveRequestLogLevel(
+  method: string,
+  statusCode: number,
+  elapsedMs: number,
+  routineWrite = false,
+): RequestLogLevel {
   if (statusCode >= 400) return 'info';
   if (elapsedMs >= SLOW_REQUEST_MS) return 'info';
+  if (routineWrite) return statusCode >= 200 ? 'debug' : 'info';
   if (!READ_METHODS.has(method.toUpperCase())) return 'info';
   return 'debug';
 }
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** See resolveRequestLogLevel: successful fast responses log at debug. */
+    routineWrite?: boolean;
+  }
+}
+
 function logCompletedRequest(request: FastifyRequest, reply: FastifyReply): void {
   const elapsedMs = Math.round(reply.elapsedTime);
-  const level = resolveRequestLogLevel(request.method, reply.statusCode, elapsedMs);
+  const routineWrite = request.routeOptions.config?.routineWrite === true;
+  const level = resolveRequestLogLevel(request.method, reply.statusCode, elapsedMs, routineWrite);
   request.log[level](
     { method: request.method, url: request.url, statusCode: reply.statusCode, elapsedMs },
     `${request.method} ${request.url} ${reply.statusCode} ${elapsedMs}ms`,

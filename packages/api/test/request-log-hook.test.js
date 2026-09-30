@@ -27,6 +27,17 @@ describe('request-log-hook: resolveRequestLogLevel', () => {
     assert.equal(resolveRequestLogLevel('GET', 200, SLOW_REQUEST_MS), 'info');
   });
 
+  it('routine writes are quiet only for successful, fast responses', () => {
+    assert.equal(resolveRequestLogLevel('POST', 200, 5, true), 'debug');
+    assert.equal(resolveRequestLogLevel('PUT', 204, 5, true), 'debug');
+    assert.equal(resolveRequestLogLevel('POST', 304, 5, true), 'debug');
+    assert.equal(resolveRequestLogLevel('POST', 401, 5, true), 'info');
+    assert.equal(resolveRequestLogLevel('POST', 429, 5, true), 'info');
+    assert.equal(resolveRequestLogLevel('POST', 500, 5, true), 'info');
+    assert.equal(resolveRequestLogLevel('POST', 200, SLOW_REQUEST_MS, true), 'info');
+    assert.equal(resolveRequestLogLevel('POST', 100, 5, true), 'info');
+  });
+
   it('state-changing methods → info', () => {
     assert.equal(resolveRequestLogLevel('POST', 200, 5), 'info');
     assert.equal(resolveRequestLogLevel('DELETE', 204, 5), 'info');
@@ -52,8 +63,12 @@ describe('request-log-hook: registerRequestLogHook', () => {
     registerRequestLogHook(app);
     app.get('/poll', async () => ({ ok: true }));
     app.post('/write', async () => ({ ok: true }));
+    app.post('/routine', { config: { routineWrite: true } }, async () => ({ ok: true }));
+    app.post('/routine-error', { config: { routineWrite: true } }, async (_request, reply) => reply.code(429).send());
     await app.inject({ method: 'GET', url: '/poll' });
     await app.inject({ method: 'POST', url: '/write' });
+    await app.inject({ method: 'POST', url: '/routine' });
+    await app.inject({ method: 'POST', url: '/routine-error' });
     await app.inject({ method: 'GET', url: '/missing' });
     await app.close();
     return lines;
@@ -62,12 +77,14 @@ describe('request-log-hook: registerRequestLogHook', () => {
   it('at info: polling GET is silent; write and 404 each log exactly one line', async () => {
     const lines = await captureLogs('info');
     const urls = lines.filter((l) => l.url).map((l) => `${l.method} ${l.url} ${l.statusCode}`);
-    assert.deepEqual(urls.sort(), ['GET /missing 404', 'POST /write 200']);
+    assert.deepEqual(urls.sort(), ['GET /missing 404', 'POST /routine-error 429', 'POST /write 200']);
     assert.ok(!lines.some((l) => l.msg === 'incoming request' || l.msg === 'request completed'));
   });
 
   it('at debug: polling GET is logged too', async () => {
     const lines = await captureLogs('debug');
     assert.ok(lines.some((l) => l.url === '/poll' && l.level === 20));
+    assert.ok(lines.some((l) => l.url === '/routine' && l.level === 20));
+    assert.ok(lines.some((l) => l.url === '/routine-error' && l.level === 30));
   });
 });

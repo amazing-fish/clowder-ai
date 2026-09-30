@@ -1618,52 +1618,57 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
   // F069-R5: POST /api/threads/:id/read/latest — ack to latest real message server-side.
   // Eliminates frontend timing races: the server finds the latest message and acks it
   // in one atomic operation, so the client never needs to guess which ID to send.
-  app.post<{ Params: { id: string } }>('/api/threads/:id/read/latest', async (request, reply) => {
-    const userId = resolveUserId(request, {});
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required' };
-    }
+  // Read-marker ack on every thread view: quiet unless it fails or is slow.
+  app.post<{ Params: { id: string } }>(
+    '/api/threads/:id/read/latest',
+    { config: { routineWrite: true } },
+    async (request, reply) => {
+      const userId = resolveUserId(request, {});
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required' };
+      }
 
-    if (!opts.readStateStore) {
-      reply.status(501);
-      return { error: 'Read state store not available' };
-    }
+      if (!opts.readStateStore) {
+        reply.status(501);
+        return { error: 'Read state store not available' };
+      }
 
-    if (!messageStore) {
-      reply.status(501);
-      return { error: 'Message store not available' };
-    }
+      if (!messageStore) {
+        reply.status(501);
+        return { error: 'Message store not available' };
+      }
 
-    const { id } = request.params;
-    const thread = await threadStore.get(id);
-    if (!thread) {
-      reply.status(404);
-      return { error: 'Thread not found' };
-    }
+      const { id } = request.params;
+      const thread = await threadStore.get(id);
+      if (!thread) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
 
-    // F297 AC-D4: stay in visibility order, but require durable owner-read
-    // evidence so a queued mutable stream cannot be acknowledged mid-flight.
-    const latest = await messageStore.getLatestVisibleCursor(id, {
-      evidence: 'durable_owner_read',
-      viewerUserId: userId,
-    });
-    if (!latest) {
-      return { advanced: false, caughtUp: true, reason: 'no messages' };
-    }
+      // F297 AC-D4: stay in visibility order, but require durable owner-read
+      // evidence so a queued mutable stream cannot be acknowledged mid-flight.
+      const latest = await messageStore.getLatestVisibleCursor(id, {
+        evidence: 'durable_owner_read',
+        viewerUserId: userId,
+      });
+      if (!latest) {
+        return { advanced: false, caughtUp: true, reason: 'no messages' };
+      }
 
-    // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor, {
-      repairUnresolvableLegacy: true,
-    });
-    // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
-    // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
-    const afterState = await opts.readStateStore.get(userId, id);
-    const caughtUp =
-      advanced || (await isReadStateCaughtUp(afterState, latest.cursor, latest.messageId, messageStore, userId, id));
-    // #1200 RED #23b: return both raw messageId and canonical v2 cursor
-    return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
-  });
+      // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+      const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor, {
+        repairUnresolvableLegacy: true,
+      });
+      // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
+      // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
+      const afterState = await opts.readStateStore.get(userId, id);
+      const caughtUp =
+        advanced || (await isReadStateCaughtUp(afterState, latest.cursor, latest.messageId, messageStore, userId, id));
+      // #1200 RED #23b: return both raw messageId and canonical v2 cursor
+      return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
+    },
+  );
 };
 
 /** Re-export：presence 投影已抽到 `sidebar-presence-projection.ts`（cloud R9 P1）。 */

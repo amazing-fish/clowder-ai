@@ -7,6 +7,7 @@ import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/
 import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
+import { logMeasurement } from '../../../../../infrastructure/log-levels.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { visibilityCursorDeferredBoundaryRejected } from '../../../../../infrastructure/telemetry/instruments.js';
 import {
@@ -1690,7 +1691,8 @@ export async function assembleIncrementalContext(
     auditCapture,
   );
   const projectionAudit = buildIncrementalProjectionAudit(auditCapture.candidates, result);
-  log.info(
+  logMeasurement(
+    log,
     {
       f148: 'projection-audit',
       threadId,
@@ -1928,18 +1930,22 @@ async function assembleIncrementalContextInternal(
     bestNextSource,
   });
 
-  log.info({
-    f148: 'navigation-header',
-    threadId,
-    catId,
-    hasBaton: baton !== null,
-    batonFrom: baton?.fromSpeakerDisplay ?? null,
-    taskCount: activeTasks.length,
-    artifactCount: recentArtifacts.length,
-    headerLength: navigationHeader.length,
-    unseenCount: unseen.length,
-    batonCandidateCount: batonCandidates.length,
-  });
+  logMeasurement(
+    log,
+    {
+      f148: 'navigation-header',
+      threadId,
+      catId,
+      hasBaton: baton !== null,
+      batonFrom: baton?.fromSpeakerDisplay ?? null,
+      taskCount: activeTasks.length,
+      artifactCount: recentArtifacts.length,
+      headerLength: navigationHeader.length,
+      unseenCount: unseen.length,
+      batonCandidateCount: batonCandidates.length,
+    },
+    '[F148] navigation header assembled',
+  );
 
   // F296: unread volume owns only delta shaping. It cannot prove whether the
   // provider still holds working memory.
