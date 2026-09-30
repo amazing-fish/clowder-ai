@@ -135,6 +135,88 @@ describe('InteractiveBlock customInput integration', () => {
     expect(dispatched).toBe('其他：用 ref 修闭包');
   });
 
+  it('multi-select: checking a customInput option shows an input and sends its text', () => {
+    const block: RichInteractiveBlock = {
+      id: 'test-block-ms',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'multi-select',
+      messageTemplate: '处理这些：{selection}',
+      options: [
+        { id: 'fix', label: '修报错' },
+        { id: 'other', label: '其他想法', customInput: true, customInputPlaceholder: '说说你的想法' },
+      ],
+    };
+
+    act(() => {
+      root.render(React.createElement(InteractiveBlock, { block, messageId: 'msg-ms' }));
+    });
+
+    const clickOption = (label: string) => {
+      const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(label));
+      act(() => btn!.click());
+    };
+    const submitBtn = () =>
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('确认选择')) as
+        | HTMLButtonElement
+        | undefined;
+
+    clickOption('修报错');
+    expect(container.querySelector('input')).toBeNull();
+
+    clickOption('其他想法');
+    const input = container.querySelector('input[placeholder="说说你的想法"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    expect(submitBtn()?.disabled).toBe(true);
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '给晨晨写能力边界');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(submitBtn()?.disabled).toBe(false);
+
+    act(() => submitBtn()!.click());
+    expect(dispatched).toBe('处理这些：修报错, 其他想法：给晨晨写能力边界');
+  });
+
+  it('multi-select: unchecking the customInput option hides the input and drops its text', () => {
+    const block: RichInteractiveBlock = {
+      id: 'test-block-ms-2',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'multi-select',
+      options: [
+        { id: 'a', label: '方案 A' },
+        { id: 'other', label: '其他', customInput: true },
+      ],
+    };
+
+    act(() => {
+      root.render(React.createElement(InteractiveBlock, { block, messageId: 'msg-ms-2' }));
+    });
+
+    const clickOption = (label: string) => {
+      const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith(label));
+      act(() => btn!.click());
+    };
+
+    clickOption('方案 A');
+    clickOption('其他');
+    const input = container.querySelector('input') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '不该出现');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    clickOption('其他');
+    expect(container.querySelector('input')).toBeNull();
+
+    const submit = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('确认选择'));
+    act(() => submit!.click());
+    expect(dispatched).toBe('我选了：方案 A');
+  });
+
   it('dispatches default message when no custom text is entered (normal option)', () => {
     const block: RichInteractiveBlock = {
       id: 'test-block-3',

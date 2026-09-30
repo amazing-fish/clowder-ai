@@ -13,12 +13,14 @@ import {
   resolveSafeInteractiveCallbackEndpoint,
   shouldKeepGuideOfferInteractive,
 } from './guideClientActions';
+import { OptionIcon } from './InteractiveOptionIcon';
+import { MultiSelectInteraction } from './MultiSelectInteraction';
 
 // ── Pure function (exported for testing) ────────────────────
 
 export function buildSelectionMessage(
   interactiveType: string,
-  options: Array<{ id: string; label: string; emoji?: string }>,
+  options: Array<{ id: string; label: string; emoji?: string; customInput?: boolean }>,
   selectedIds: string[],
   messageTemplate?: string,
   title?: string,
@@ -32,6 +34,16 @@ export function buildSelectionMessage(
 
   const selected = selectedIds.map((id) => options.find((o) => o.id === id)).filter(Boolean) as typeof options;
   const labels = selected.map((o) => (o.emoji ? `${o.emoji} ${o.label}` : o.label));
+
+  // Multi-select: attach the custom text to its own option ("其他想法：…") and keep the
+  // normal template/default phrasing for the whole selection.
+  const customIdx = selected.findIndex((o) => o.customInput);
+  if (interactiveType === 'multi-select' && customText && customIdx >= 0) {
+    labels[customIdx] = `${labels[customIdx]}：${customText}`;
+    if (messageTemplate) return messageTemplate.replace('{selection}', labels.join(', '));
+    const base = `我选了：${labels.join(', ')}`;
+    return title ? `${base}（${title}）` : base;
+  }
 
   // If a customInput option was selected and user typed text, use that text
   if (customText) {
@@ -59,13 +71,6 @@ function patchBlockState(messageId: string, blockId: string, patch: { disabled?:
 
 function dispatchInteractiveSend(text: string, sendContext?: string) {
   window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
-}
-
-/** Render option icon: prefer SVG icon over emoji */
-function OptionIcon({ opt, className = 'w-5 h-5' }: { opt: InteractiveOption; className?: string }) {
-  if (opt.icon) return <CafeIcon name={opt.icon} className={`${className} text-conn-amber-text shrink-0`} />;
-  if (opt.emoji) return <span className="text-base shrink-0 leading-none">{opt.emoji}</span>;
-  return null;
 }
 
 // ── Sub-components ──────────────────────────────────────────
@@ -181,90 +186,6 @@ function SelectInteraction({
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
           确认选择
-        </button>
-      )}
-    </div>
-  );
-}
-
-function MultiSelectInteraction({
-  options,
-  disabled,
-  selectedIds,
-  maxSelect,
-  onSelect,
-  hideSubmit,
-}: {
-  options: InteractiveOption[];
-  disabled: boolean;
-  selectedIds: string[];
-  maxSelect?: number;
-  onSelect: (ids: string[]) => void;
-  hideSubmit?: boolean;
-}) {
-  const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
-
-  const toggle = (id: string) => {
-    if (disabled) return;
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else if (!maxSelect || next.size < maxSelect) {
-        next.add(id);
-      }
-      // In group mode, notify parent of every change
-      if (hideSubmit) onSelect([...next]);
-      return next;
-    });
-  };
-
-  return (
-    <div className="space-y-2">
-      {options.map((opt) => {
-        const isChecked = checked.has(opt.id);
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            disabled={disabled}
-            onClick={() => toggle(opt.id)}
-            className={`flex items-center gap-2.5 w-full px-4 py-3 rounded-xl border-[1.5px] text-sm transition-all text-left
-              ${isChecked ? 'border-conn-amber-ring bg-conn-amber-bg ' : 'border-cafe hover:border-conn-amber-ring'}
-              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-          >
-            <span
-              className={`shrink-0 w-5 h-5 rounded-md flex items-center justify-center transition-colors ${
-                isChecked ? 'bg-[var(--semantic-warning)]' : 'border-[1.5px] border-cafe'
-              }`}
-            >
-              {isChecked && (
-                <svg
-                  className="w-3.5 h-3.5 text-[var(--cafe-surface)]"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={3}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </span>
-            <OptionIcon opt={opt} />
-            <span className={`font-semibold ${isChecked ? 'text-conn-amber-text' : ''}`}>{opt.label}</span>
-          </button>
-        );
-      })}
-      {!disabled && !hideSubmit && checked.size > 0 && (
-        <button
-          type="button"
-          onClick={() => onSelect([...checked])}
-          className="mt-2 w-full py-2.5 bg-[var(--semantic-warning)] text-[var(--cafe-surface)] rounded-full text-sm font-semibold hover:opacity-90 transition-colors flex items-center justify-center gap-1.5"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          确认选择 ({checked.size})
         </button>
       )}
     </div>
@@ -651,6 +572,7 @@ export function InteractiveBlock({
           maxSelect={block.maxSelect}
           onSelect={handleSelect}
           hideSubmit={pendingMode}
+          onCustomText={handleCustomText}
         />
       )}
       {block.interactiveType === 'card-grid' && (

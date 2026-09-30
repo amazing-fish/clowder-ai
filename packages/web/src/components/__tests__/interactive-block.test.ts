@@ -106,6 +106,37 @@ describe('F096: buildSelectionMessage', () => {
     expect(result).toBe('其他：六组最好（Hub 分几组）');
   });
 
+  it('multi-select customInput — attaches text to its own option inside the template', () => {
+    const result = buildSelectionMessage(
+      'multi-select',
+      [
+        { id: 'a', label: 'P1 修报错' },
+        { id: 'other', label: '其他想法', customInput: true },
+        { id: 'b', label: 'P2 删目录' },
+      ],
+      ['a', 'other', 'b'],
+      '处理这些：{selection}',
+      undefined,
+      '给晨晨写能力边界',
+    );
+    expect(result).toBe('处理这些：P1 修报错, 其他想法：给晨晨写能力边界, P2 删目录');
+  });
+
+  it('multi-select customInput — without template uses default phrasing', () => {
+    const result = buildSelectionMessage(
+      'multi-select',
+      [
+        { id: 'a', label: 'A' },
+        { id: 'other', label: '其他', customInput: true },
+      ],
+      ['a', 'other'],
+      undefined,
+      '选方案',
+      '都要',
+    );
+    expect(result).toBe('我选了：A, 其他：都要（选方案）');
+  });
+
   it('customInput — empty custom text falls through to default', () => {
     const result = buildSelectionMessage('select', [{ id: 'a', label: '方案 A' }], ['a'], undefined, undefined, '');
     expect(result).toBe('我选了：方案 A');
