@@ -1,3 +1,4 @@
+import { OWNER_STATE_REF_PATTERN } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
@@ -32,7 +33,7 @@ const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
     ownerFeatureId: bounded(120),
-    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/),
+    ownerStateRef: bounded(500).regex(OWNER_STATE_REF_PATTERN),
     version: bounded(240).optional(),
   })
   .strict();

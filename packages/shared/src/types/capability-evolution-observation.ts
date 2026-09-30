@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { ownerTruthRefV1Schema } from './capability-evolution-refs.js';
+import { EVOLUTION_JOIN_KEY_PATTERN, ownerTruthRefV1Schema } from './capability-evolution-refs.js';
 
 const bounded = (max: number) => z.string().trim().min(1).max(max);
 const canonicalJoinKeySchema = bounded(500).regex(
-  /^(?:thread|message|subject):[^\s{}[\]"']+$/,
+  EVOLUTION_JOIN_KEY_PATTERN,
   'join keys must use a canonical thread/message/subject coordinate',
 );
 

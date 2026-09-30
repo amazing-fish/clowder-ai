@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  OWNER_STATE_REF_PATTERN,
   type OwnerTruthRefV1,
   ownerTruthRefV1Schema,
   type PawFeelDirectRepairAuthorityDecisionV1,
@@ -48,7 +49,7 @@ function validSourceToolRoute(candidate: SourceToolRouteRefV1): boolean {
     candidate.ownerFeatureId === candidate.ownerFeatureId.trim() &&
     candidate.ownerFeatureId.length > 0 &&
     candidate.ownerStateRef === candidate.ownerStateRef.trim() &&
-    /^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/u.test(candidate.ownerStateRef) &&
+    OWNER_STATE_REF_PATTERN.test(candidate.ownerStateRef) &&
     (candidate.match === 'exact' || candidate.match === 'prefix')
   );
 }

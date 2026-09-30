@@ -3,6 +3,7 @@ import {
   type EvolutionPreparationMediaRequestV1,
   type EvolutionResolvedPreparationReviewV1,
   evolutionPreparationGroupV1Schema,
+  OWNER_STATE_REF_PREFIX_PATTERN,
   type OwnerTruthRefV1,
   timestampSchema,
 } from '@cat-cafe/shared';
@@ -17,11 +18,7 @@ export const MICRODUCK_FOOTBALL_PUBLICATION_PATH =
   'docs/videos/f311-microduck-roadshow/pipeline/football/workspace-publication.json';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
-const stateRef = z
-  .string()
-  .min(1)
-  .max(500)
-  .regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']*$/u);
+const stateRef = z.string().min(1).max(500).regex(OWNER_STATE_REF_PREFIX_PATTERN);
 const resourcePath = z
   .string()
   .min(1)

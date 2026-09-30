@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ownerTruthRefV1Schema, refIdentity } from '@cat-cafe/shared';
+import { NON_PAYLOAD_REF_ID_PATTERN, ownerTruthRefV1Schema, refIdentity } from '@cat-cafe/shared';
 import type { EvalRepairOwnerLineage } from './eval-repair-approval-contracts.js';
 import type {
   EvalRepairOwnerRuntimeBindings,
@@ -21,7 +21,7 @@ function validRouteRef(candidate: EvalRepairOwnerRuntimeRouteRefV1): boolean {
     typeof candidate.ownerFeatureId === 'string' &&
     candidate.ownerFeatureId.trim().length > 0 &&
     typeof candidate.ownerStateRef === 'string' &&
-    /^[^\s{}[\]"']+$/.test(candidate.ownerStateRef) &&
+    NON_PAYLOAD_REF_ID_PATTERN.test(candidate.ownerStateRef) &&
     (candidate.match === 'exact' || candidate.match === 'prefix')
   );
 }
