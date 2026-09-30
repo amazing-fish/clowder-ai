@@ -12,6 +12,7 @@
   .\scripts\start-windows.ps1 -Quick       # skip rebuild
   .\scripts\start-windows.ps1 -Memory      # skip Redis, use in-memory storage
   .\scripts\start-windows.ps1 -Dev         # development mode (next dev, hot reload)
+  .\scripts\start-windows.ps1 -Dev -Connectors  # dev mode that still attaches IM connectors
   .\scripts\start-windows.ps1 -Debug       # enable debug-level logging (writes to data/logs/api/)
   .\scripts\start-windows.ps1 -LogLevel warn  # quiet terminal: only warn/error in this window
                                               # (the log file still keeps info + measurements)
@@ -24,12 +25,19 @@ param(
     [switch]$Debug,
     # Terminal log threshold for the API (overrides LOG_LEVEL from .env; -Debug wins).
     [ValidateSet("trace", "debug", "info", "warn", "error", "fatal", "silent")]
-    [string]$LogLevel
+    [string]$LogLevel,
+    # Grant this launch authority to auto-attach preconfigured IM connectors
+    # (WeChat/Telegram/Feishu/...). -Dev denies it by default; dotenv cannot grant it.
+    [switch]$Connectors
 )
 
 # ValidateSet is case-insensitive but the API's level resolver is not:
 # -LogLevel WARN/SILENT would silently fall back to info. Normalize here.
 if ($LogLevel) { $LogLevel = $LogLevel.ToLowerInvariant() }
+
+# -Connectors is launcher authority, equivalent to CONNECTOR_GATEWAY_AUTOSTART=1 in the
+# launching process env. Set before that env is captured so the dotenv scrub keeps it.
+if ($Connectors) { $env:CONNECTOR_GATEWAY_AUTOSTART = "1" }
 
 $ErrorActionPreference = "Stop"
 
@@ -673,6 +681,12 @@ try {
     Write-Host "  Storage:  $storageMode"
     Write-Host "  Embed:    $embeddingMode"
     Write-Host "  Frontend: $frontendMode"
+    $imConnectorMode = if (@('1', 'true', 'yes', 'on') -contains "$connectorGatewayAutostart".Trim().ToLowerInvariant()) {
+        "autostart on"
+    } else {
+        "autostart off (use -Connectors to attach IM connectors)"
+    }
+    Write-Host "  IM:       $imConnectorMode"
     if ($Debug) {
         Write-Host "  Debug:    ON (logs: $logDir)" -ForegroundColor Yellow
     } elseif ($LogLevel -eq "silent") {
