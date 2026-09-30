@@ -57,24 +57,55 @@ const DEFAULT_LIVENESS: ThreadLiveness = {
  * to the same parent invocation; an old terminal turn must never suppress a
  * newly admitted slot for the same cat.
  */
-function projectTerminalLiveness(liveness: ThreadLiveness): ThreadLiveness {
+interface TerminalProjection {
+  hasActive: boolean;
+  activeInvocations: ThreadLiveness['activeInvocations'];
+  catStatuses: ThreadLiveness['catStatuses'];
+}
+
+interface TerminalProjectionMemo {
+  catInvocations: ThreadLiveness['catInvocations'];
+  catStatuses: ThreadLiveness['catStatuses'];
+  projection: TerminalProjection | null;
+}
+
+/**
+ * Projection results keyed by input references. `useThreadLiveness` compares
+ * fields shallowly, so the projected objects must keep their identity while the
+ * store slices they derive from are unchanged; fresh objects per call make the
+ * useSyncExternalStore snapshot unstable ("Maximum update depth exceeded").
+ */
+const terminalProjectionMemo = new WeakMap<ThreadLiveness['activeInvocations'], TerminalProjectionMemo>();
+
+function computeTerminalProjection(liveness: ThreadLiveness): TerminalProjection | null {
   const projection = projectTerminalActiveInvocationSlots(liveness.activeInvocations, liveness.catInvocations);
-  const terminalCats = new Map<string, CatStatusType>();
+  if (projection.terminalSlots.length === 0) return null;
 
-  for (const { catId, status } of projection.terminalSlots) {
-    terminalCats.set(catId, status);
-  }
-
-  if (terminalCats.size === 0) return liveness;
   const catStatuses = { ...liveness.catStatuses };
-  for (const [catId, status] of terminalCats) catStatuses[catId] = status;
-
+  for (const { catId, status } of projection.terminalSlots) catStatuses[catId] = status;
   return {
-    ...liveness,
     hasActive: Object.keys(projection.activeInvocations).length > 0,
     activeInvocations: projection.activeInvocations,
     catStatuses,
   };
+}
+
+function projectTerminalLiveness(liveness: ThreadLiveness): ThreadLiveness {
+  const cached = terminalProjectionMemo.get(liveness.activeInvocations);
+  let projection: TerminalProjection | null;
+  if (cached && cached.catInvocations === liveness.catInvocations && cached.catStatuses === liveness.catStatuses) {
+    projection = cached.projection;
+  } else {
+    projection = computeTerminalProjection(liveness);
+    terminalProjectionMemo.set(liveness.activeInvocations, {
+      catInvocations: liveness.catInvocations,
+      catStatuses: liveness.catStatuses,
+      projection,
+    });
+  }
+
+  if (!projection) return liveness;
+  return { ...liveness, ...projection };
 }
 
 /** Pure selector — returns the messages array for a thread, preferring the

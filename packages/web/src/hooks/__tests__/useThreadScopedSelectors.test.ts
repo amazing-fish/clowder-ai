@@ -12,6 +12,7 @@
  * every consumer.
  */
 import { describe, expect, it } from 'vitest';
+import { shallow } from 'zustand/shallow';
 import type { ChatState } from '@/stores/chatStore';
 import { selectThreadLiveness, selectThreadMessages } from '../useThreadScopedSelectors';
 
@@ -260,6 +261,37 @@ describe('F173 Phase C — selectThreadLiveness', () => {
     expect(result.activeInvocations).toEqual({});
     expect(result.catStatuses).toEqual({ 'codex-sol': 'done' });
     expect(result.targetCats).toEqual(['codex-sol']);
+  });
+
+  it('returns a shallow-stable terminal projection for unchanged store state', () => {
+    // useThreadLiveness wraps this selector with useShallow; fresh nested objects on
+    // every call make the snapshot unstable and trip React's "Maximum update depth".
+    const state = makeState({
+      currentThreadId: 'thread-a',
+      hasActiveInvocation: true,
+      activeInvocations: { 'inv-closed': { catId: 'codex-sol', mode: 'execute' } },
+      catStatuses: { 'codex-sol': 'streaming' },
+      catInvocations: {
+        'codex-sol': {
+          invocationId: 'inv-closed',
+          appServerLifecycle: {
+            stage: 'closed',
+            lastActivityAt: 123,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: true,
+          },
+        },
+      },
+    });
+
+    const first = selectThreadLiveness(state, 'thread-a');
+    const second = selectThreadLiveness(state, 'thread-a');
+
+    expect(shallow(first, second)).toBe(true);
+    expect(second.activeInvocations).toBe(first.activeInvocations);
+    expect(second.catStatuses).toBe(first.catStatuses);
   });
 
   it('does not let an old terminal lifecycle suppress a newer invocation slot', () => {
