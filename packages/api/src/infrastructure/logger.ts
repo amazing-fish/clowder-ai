@@ -148,6 +148,8 @@ type ConsoleMethodLabel = 'log' | 'warn' | 'error' | 'info' | 'debug';
 
 function consoleToPino(level: ConsolePinoLevel, stderrLabel: ConsoleMethodLabel): (...args: unknown[]) => void {
   return (...args: unknown[]) => {
+    // Respect LOG_LEVEL for the stderr echo too (console.debug used to bypass it).
+    if (!consoleLogger.isLevelEnabled(level)) return;
     const sanitized = args.map((arg) => sanitizeArg(arg));
     const msg = utilFormat(...sanitized);
     consoleLogger[level](msg);

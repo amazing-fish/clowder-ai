@@ -21,7 +21,7 @@ type AnyTaskSpec = TaskSpec_P1<any>;
 export interface PipelineContext {
   task: AnyTaskSpec;
   ledger: RunLedger;
-  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
+  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void; debug?: (msg: string) => void };
   running: Map<string, boolean>;
   tickCounts: Map<string, number>;
   lastRunAt: Map<string, number | null>;
@@ -333,9 +333,10 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     }
 
     lastRunAt.set(task.id, Date.now());
-    logger.info(
-      `[scheduler] ${task.id}: tick completed, ${gateResult.workItems.length} items (${Date.now() - startMs}ms)`,
-    );
+    // Routine per-tick heartbeat (~16% of api.log at info) → debug when supported.
+    const tickMsg = `[scheduler] ${task.id}: tick completed, ${gateResult.workItems.length} items (${Date.now() - startMs}ms)`;
+    if (logger.debug) logger.debug(tickMsg);
+    else logger.info(tickMsg);
   } finally {
     running.set(task.id, false);
   }

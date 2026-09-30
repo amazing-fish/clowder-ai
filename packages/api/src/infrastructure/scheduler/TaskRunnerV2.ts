@@ -24,7 +24,8 @@ import type {
 } from './types.js';
 
 export interface TaskRunnerV2Options {
-  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
+  /** `debug` is optional: routine lifecycle lines (registered/tick completed) fall back to `info` when absent. */
+  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void; debug?: (msg: string) => void };
   ledger: RunLedger;
   /** Phase 1b: optional actor resolver — maps role + costTier to catId */
   actorResolver?: (role: ActorRole, costTier: CostTier) => string | null;
@@ -203,6 +204,12 @@ export class TaskRunnerV2 {
     this.notifyLifecycle = opts.notifyLifecycle;
     this.dynamicTaskStore = opts.dynamicTaskStore;
     this.isThreadBusy = opts.isThreadBusy;
+  }
+
+  /** Routine lifecycle lines (registered / re-armed) — debug when the logger supports it. */
+  private logRoutine(msg: string): void {
+    if (this.logger.debug) this.logger.debug(msg);
+    else this.logger.info(msg);
   }
 
   /** Late-bind invokeTrigger (constructed after TaskRunnerV2 in boot sequence) */
@@ -424,7 +431,7 @@ export class TaskRunnerV2 {
       const timer = setInterval(runTick, task.trigger.ms);
       if (typeof timer === 'object' && 'unref' in timer) timer.unref();
       this.timers.set(task.id, timer);
-      this.logger.info(`[scheduler] ${task.id}: registered (profile=${task.profile}, interval=${task.trigger.ms}ms)`);
+      this.logRoutine(`[scheduler] ${task.id}: registered (profile=${task.profile}, interval=${task.trigger.ms}ms)`);
     }
   }
 
@@ -469,7 +476,7 @@ export class TaskRunnerV2 {
     }, ms);
     if (typeof timer === 'object' && 'unref' in timer) timer.unref();
     this.timers.set(task.id, timer);
-    this.logger.info(
+    this.logRoutine(
       `[scheduler] ${task.id}: registered (profile=${task.profile}, cron="${task.trigger.expression}", next in ${ms}ms)`,
     );
   }
@@ -585,7 +592,7 @@ export class TaskRunnerV2 {
     }, remaining);
     if (typeof timer === 'object' && 'unref' in timer) timer.unref();
     this.timers.set(task.id, timer);
-    this.logger.info(
+    this.logRoutine(
       `[scheduler] ${task.id}: registered (profile=${task.profile}, once, fireAt=${new Date(task.trigger.fireAt).toISOString()}, delay=${remaining}ms)`,
     );
   }

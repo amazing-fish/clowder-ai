@@ -351,6 +351,7 @@ import { PawFeelDispositionReconciler } from './infrastructure/harness-eval/paw-
 import { createPawFeelReconciliationTaskSpec } from './infrastructure/harness-eval/paw-feel-disposition/reconciliation-task-spec.js';
 import { PawFeelFixEvidenceResolver } from './infrastructure/harness-eval/paw-feel-disposition/route-evidence-resolver.js';
 import { PawFeelDispositionService } from './infrastructure/harness-eval/paw-feel-disposition/service.js';
+import { registerRequestLogHook } from './infrastructure/request-log-hook.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
@@ -570,7 +571,12 @@ async function main(): Promise<void> {
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
   const telemetryHandle = initTelemetry();
 
-  const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  const app = Fastify({
+    logger: customLogger as unknown as import('fastify').FastifyBaseLogger,
+    // Per-request logs come from registerRequestLogHook (errors/slow/writes at info, polling at debug).
+    disableRequestLogging: true,
+  });
+  registerRequestLogHook(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   if (!privateUserId) throw new Error('[api] CAT_CAFE_USER_ID must not be blank');
   const runtimeDeploymentRevision = resolveRuntimeDeploymentRevision(process.env.CAT_CAFE_RUNTIME_ROOT);
@@ -1519,7 +1525,11 @@ async function main(): Promise<void> {
   const schedulerFetchContent = createFetchContentFn();
 
   const taskRunnerV2 = new TaskRunnerV2({
-    logger: { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
+    logger: {
+      info: app.log.info.bind(app.log),
+      error: app.log.error.bind(app.log),
+      debug: app.log.debug.bind(app.log),
+    },
     ledger: runLedger,
     actorResolver,
     globalControlStore,

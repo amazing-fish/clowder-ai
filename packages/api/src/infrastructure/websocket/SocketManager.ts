@@ -174,7 +174,7 @@ export class SocketManager {
       // In single-user mode, all connections are 'default-user'.
       // F077 will replace this with session/cookie-based identity.
       const userId = 'default-user';
-      log.info({ socketId: socket.id, userId }, 'Client connected');
+      log.debug({ socketId: socket.id, userId }, 'Client connected');
       log.debug(
         {
           socketId: socket.id,
@@ -191,7 +191,7 @@ export class SocketManager {
       socket.join(`user:${userId}`);
 
       socket.on('disconnect', () => {
-        log.info({ socketId: socket.id }, 'Client disconnected');
+        log.debug({ socketId: socket.id }, 'Client disconnected');
       });
 
       socket.on('join_room', async (roomInput: unknown, acknowledgeInput?: unknown) => {
@@ -207,7 +207,7 @@ export class SocketManager {
         try {
           await socket.join(room);
           acknowledge?.({ ok: true, room });
-          log.info({ socketId: socket.id, room }, 'Joined room');
+          log.debug({ socketId: socket.id, room }, 'Joined room');
         } catch (error) {
           log.error({ socketId: socket.id, room, error }, 'Failed to join room');
           acknowledge?.({ ok: false, room, error: 'join_failed' });
