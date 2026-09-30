@@ -13,7 +13,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -74,7 +74,7 @@ function makePool(client) {
   return pool;
 }
 
-function makeAdapter(pool, compile) {
+function makeAdapter(pool, compile, dir = patchDir) {
   return new AcpAgentService({
     catId: 'dsh',
     pool,
@@ -83,7 +83,7 @@ function makeAdapter(pool, compile) {
     providerName: 'dsh',
     modelName: 'deepseek-v4-flash',
     agentBusyRetryDelaysMs: [1],
-    nativeL0Launcher: { command: 'node', baseArgs: DSH_ARGS, compile, patchDir },
+    nativeL0Launcher: { command: 'node', baseArgs: DSH_ARGS, compile, patchDir: dir },
   });
 }
 
@@ -153,6 +153,23 @@ describe('DSH native L0 adapter', () => {
       assert.equal(messages.at(-1).type, 'done');
     });
   }
+
+  it('fails closed when the patch file cannot be written: typed error + done, no acquire/launch', async () => {
+    // A regular file used as patchDir makes mkdir/write throw (ENOTDIR/EEXIST).
+    const blocker = join(patchDir, 'blocker');
+    writeFileSync(blocker, 'not a directory');
+    const pool = makePool(makeClient());
+    const { prepared, messages } = await run(
+      makeAdapter(pool, async () => 'FIXTURE L0', blocker),
+      'alice',
+    );
+    assert.equal(pool.acquired.length, 0);
+    assert.equal(prepared.length, 0);
+    const err = messages.find((m) => m.type === 'error');
+    assert.equal(err?.errorCode, 'native_l0_unavailable');
+    assert.match(err.error, /patch_unavailable/);
+    assert.equal(messages.at(-1).type, 'done');
+  });
 
   it('busy retry re-records the native L0 on the retried prepared launch', async () => {
     const pool = makePool(makeClient({ busyFirst: true }));

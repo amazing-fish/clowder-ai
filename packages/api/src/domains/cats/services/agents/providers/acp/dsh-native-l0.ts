@@ -139,7 +139,13 @@ export async function resolveDshNativeLaunch(
   } catch (error) {
     return { ok: false, reason: 'compile_failed', error };
   }
-  const binding = prepareDshNativeL0(catId, launcher.command, launcher.baseArgs, l0, launcher.patchDir);
+  let binding: DshNativeL0Binding | null;
+  try {
+    // Materialization touches disk (mkdir/write); EACCES/ENOSPC/ENOTDIR must stay typed.
+    binding = prepareDshNativeL0(catId, launcher.command, launcher.baseArgs, l0, launcher.patchDir);
+  } catch (error) {
+    return { ok: false, reason: 'patch_unavailable', error };
+  }
   if (!binding) return { ok: false, reason: 'patch_unavailable' };
   return { ok: true, binding, nativeScope: computeDshNativeScope(owner, binding.fingerprint) };
 }

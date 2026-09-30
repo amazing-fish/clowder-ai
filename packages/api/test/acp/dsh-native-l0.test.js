@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -149,6 +149,21 @@ describe('dsh-native-l0', () => {
     assert.equal(unsafe.ok, false);
     assert.equal(unsafe.reason, 'patch_unavailable');
   });
+
+  it('patch materialization failure is a typed patch_unavailable, not a rejection', () =>
+    withTmp(async (dir) => {
+      const blocker = join(dir, 'blocker');
+      writeFileSync(blocker, 'not a directory');
+      const result = await resolveDshInvocationLaunch(
+        { command: 'node', baseArgs: DSH_ARGS, compile: async () => 'FIXTURE L0', patchDir: blocker },
+        BASE_KEY,
+        'dsh',
+        'alice',
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.reason, 'patch_unavailable');
+      assert.ok(result.error instanceof Error, 'disk error is carried for logging');
+    }));
 
   it('native instructions carry the exact L0 body plus patch binding evidence', () =>
     withTmp((dir) => {
