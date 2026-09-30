@@ -125,7 +125,7 @@ describe('Thread API', () => {
 
     assert.equal(res.statusCode, 500);
     const body = JSON.parse(res.body);
-    assert.match(body.error, /Host workspace root/);
+    assert.match(body.error, /Bootcamp workspace root/);
   });
 
   it('POST /api/threads migrates an explicit runtime path to the persistent workspace', async () => {

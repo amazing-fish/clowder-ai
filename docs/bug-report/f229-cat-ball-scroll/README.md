@@ -11,4 +11,4 @@ The fixture mounts the real full `ThreadChatSurface` for selected thread A and t
 3. [After append](artifacts/03-after-append.png): a new B message appears at the bottom and B follows it; A remains at 220.
 4. [After full remount](artifacts/04-full-remount-restored.png): after unmounting and remounting A, its `scrollTop` is restored to 220.
 
-The exact source-revision run passed 1/1 Chromium test. API workspace behavior is covered separately by `packages/api/test/invoke-single-cat.test.js`; this browser fixture does not claim to validate the OpenCode provider.
+The exact source-revision run passed 1/1 Chromium test.

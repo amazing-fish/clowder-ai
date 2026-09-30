@@ -19,10 +19,10 @@ import {
   aggregateThreadArtifacts,
   collectAllThreadMessages,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
+import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
 import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/closure/freshness-closure-telemetry.js';
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
-import { resolveHostWorkspaceRoot } from '../domains/cats/services/host-workspace-root.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
 import { compareCursors, parseCursor } from '../domains/cats/services/stores/cursor.js';
@@ -526,7 +526,7 @@ async function resolveCreateThreadProjectPath(
   bootcampState: BootcampStateV1 | undefined,
 ): Promise<{ ok: true; projectPath: string | undefined } | { ok: false; statusCode: number; error: string }> {
   if (bootcampState && (!projectPath || projectPath === 'default')) {
-    const bootcampWorkspace = await resolveHostWorkspaceRoot();
+    const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
     if (!bootcampWorkspace.ok) {
       return {
         ok: false,

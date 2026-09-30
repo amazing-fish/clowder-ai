@@ -19,9 +19,9 @@ describe('bootcamp workspace root resolution', () => {
   it('uses CAT_CAFE_WORKSPACE_ROOT even when runtime root is set', async () => {
     const workspaceRoot = await createTempDir();
     const runtimeRoot = await createTempDir();
-    const { resolveHostWorkspaceRoot } = await import('../dist/domains/cats/services/host-workspace-root.js');
+    const { resolveBootcampWorkspaceRoot } = await import('../dist/domains/cats/services/bootcamp/workspace-root.js');
 
-    const resolved = await resolveHostWorkspaceRoot({
+    const resolved = await resolveBootcampWorkspaceRoot({
       CAT_CAFE_WORKSPACE_ROOT: workspaceRoot,
       CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
     });
@@ -33,9 +33,9 @@ describe('bootcamp workspace root resolution', () => {
   it('refuses to fall back to cwd in runtime mode without CAT_CAFE_WORKSPACE_ROOT', async () => {
     const runtimeRoot = await createTempDir();
     const cwd = await createTempDir();
-    const { resolveHostWorkspaceRoot } = await import('../dist/domains/cats/services/host-workspace-root.js');
+    const { resolveBootcampWorkspaceRoot } = await import('../dist/domains/cats/services/bootcamp/workspace-root.js');
 
-    const resolved = await resolveHostWorkspaceRoot({ CAT_CAFE_RUNTIME_ROOT: runtimeRoot }, cwd);
+    const resolved = await resolveBootcampWorkspaceRoot({ CAT_CAFE_RUNTIME_ROOT: runtimeRoot }, cwd);
 
     assert.equal(resolved.ok, false);
     assert.match(resolved.error, /workspace root is not configured/);
@@ -43,9 +43,9 @@ describe('bootcamp workspace root resolution', () => {
 
   it('uses cwd outside runtime mode', async () => {
     const cwd = await createTempDir();
-    const { resolveHostWorkspaceRoot } = await import('../dist/domains/cats/services/host-workspace-root.js');
+    const { resolveBootcampWorkspaceRoot } = await import('../dist/domains/cats/services/bootcamp/workspace-root.js');
 
-    const resolved = await resolveHostWorkspaceRoot({}, cwd);
+    const resolved = await resolveBootcampWorkspaceRoot({}, cwd);
 
     assert.equal(resolved.ok, true);
     assert.equal(resolved.projectPath, cwd);
