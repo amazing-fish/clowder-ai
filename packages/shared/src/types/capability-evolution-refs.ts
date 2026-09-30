@@ -8,7 +8,14 @@ import { z } from 'zod';
  */
 export const bounded = (max: number) => z.string().trim().min(1).max(max);
 export const timestampSchema = z.string().datetime({ offset: true });
-const ownerStateRefSchema = bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/, 'owner state refs must use non-payload kind:id syntax');
+// Escape both brackets: nested-set regex engines reject a bare `[` inside a class.
+// JSON Schema emits only .source, so these patterns must not depend on RegExp flags.
+const nonPayloadRefIdCharacter = String.raw`[^\s{}\[\]"']`;
+export const NON_PAYLOAD_REF_ID_PATTERN = new RegExp(`^${nonPayloadRefIdCharacter}+$`);
+export const OWNER_STATE_REF_PATTERN = new RegExp(`^[a-z][a-z0-9-]*:${nonPayloadRefIdCharacter}+$`);
+export const OWNER_STATE_REF_PREFIX_PATTERN = new RegExp(`^[a-z][a-z0-9-]*:${nonPayloadRefIdCharacter}*$`);
+export const EVOLUTION_JOIN_KEY_PATTERN = new RegExp(`^(?:thread|message|subject):${nonPayloadRefIdCharacter}+$`);
+const ownerStateRefSchema = bounded(500).regex(OWNER_STATE_REF_PATTERN, 'owner state refs must use non-payload kind:id syntax');
 export const refShape = {
   ownerFeatureId: bounded(120),
   ownerStateRef: ownerStateRefSchema,

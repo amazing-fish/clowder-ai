@@ -1,3 +1,4 @@
+import { NON_PAYLOAD_REF_ID_PATTERN } from '@cat-cafe/shared';
 import type { MeasurementBundleCertificate, MeasurementBundleResult } from './measurement-bundle-schema.js';
 import type { MeasurementDecisionProof } from './measurement-decision-proof-schema.js';
 
@@ -116,7 +117,7 @@ export type NormalizedMeasurementDecisionResult =
  * that would break that shape mean the identity cannot be expressed, which is a fail-closed
  * condition — not a licence to sanitise the owner's id into something that no longer addresses it.
  */
-const REF_ID_PATTERN = /^[^\s{}[\]"']+$/;
+const REF_ID_PATTERN = NON_PAYLOAD_REF_ID_PATTERN;
 
 function ownerRef(ownerFeatureId: string, kind: string, id: string): MeasurementOwnerRefV1 | undefined {
   if (!REF_ID_PATTERN.test(id) || !REF_ID_PATTERN.test(kind)) return undefined;

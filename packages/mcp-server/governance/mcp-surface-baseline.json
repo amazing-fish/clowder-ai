@@ -2046,7 +2046,7 @@
                   "ownerStateRef": {
                     "maxLength": 500,
                     "minLength": 1,
-                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                     "type": "string"
                   },
                   "version": {
@@ -2111,7 +2111,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:dccf848a265efb15fef103bbb6003b8398028ccb5fd61774be8bcc60624137e6",
+      "inputSchemaDigest": "sha256:d8ea6ef6224fad993d6d1b80b3c758afce5b730668ded076bdfdd2442de14fdd",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -3057,7 +3057,7 @@
                   "ownerStateRef": {
                     "maxLength": 500,
                     "minLength": 1,
-                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                     "type": "string"
                   },
                   "version": {
@@ -3160,7 +3160,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:35c2f36242a940cd78597af9e1ed35bcfa9e21f704edda77a8271c0b865bb9df",
+      "inputSchemaDigest": "sha256:b1f3e66a939fc3cf6e3b97732d30431ef291fd1c2f004cd51fff898b3b146cac",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -6211,7 +6211,7 @@
                 "joinKey": {
                   "maxLength": 500,
                   "minLength": 1,
-                  "pattern": "^(?:thread|message|subject):[^\\s{}[\\]\"']+$",
+                  "pattern": "^(?:thread|message|subject):[^\\s{}\\[\\]\"']+$",
                   "type": "string"
                 },
                 "namedConsumerRef": {
@@ -6252,7 +6252,7 @@
               "ownerStateRef": {
                 "maxLength": 500,
                 "minLength": 1,
-                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                 "type": "string"
               },
               "version": {
@@ -6278,7 +6278,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:94b89a9539f7e0a8318bbd72cda6e777ccc60774540dae8fc95762cfa6a59578",
+      "inputSchemaDigest": "sha256:772811be6fa7e9b98844a8ccbf1c02e122279df5a0d23784047467fc34b8ff14",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -6328,7 +6328,7 @@
               "ownerStateRef": {
                 "maxLength": 500,
                 "minLength": 1,
-                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                 "type": "string"
               },
               "version": {
@@ -6388,7 +6388,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:047602eb7a3d42fc41f10a3bbc34211969d5165d8e4f35effcf34a24869b51aa",
+      "inputSchemaDigest": "sha256:34f419d01ba4a7a0cb7aa56ea5d3bcb4f7eb6c2ff97cc0bf6ba3828e7e9bae1d",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -7482,7 +7482,7 @@
               "ownerStateRef": {
                 "maxLength": 500,
                 "minLength": 1,
-                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                 "type": "string"
               },
               "version": {
@@ -7516,7 +7516,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:b526cf2a34a9254b027ebd546ed12e436ce5afa606a0ce218ea73dfc20e4a511",
+      "inputSchemaDigest": "sha256:c08aaf046170760b2bb543201f24a8bc8e3cfdab7f1b6424f22ea66352146d89",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -7997,7 +7997,7 @@
               "ownerStateRef": {
                 "maxLength": 500,
                 "minLength": 1,
-                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                 "type": "string"
               },
               "version": {
@@ -8042,7 +8042,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:8f82d9121f27caede9913b7fcbd332bd14fbf46cf9a568d8861981c26087c068",
+      "inputSchemaDigest": "sha256:8a760b08728a889271e72e078ec935776f81781d8c4d9005b5d6c41040630263",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -11889,7 +11889,7 @@
                           "ownerStateRef": {
                             "maxLength": 500,
                             "minLength": 1,
-                            "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                            "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                             "type": "string"
                           },
                           "version": {
@@ -12080,7 +12080,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:425f52d0c04314819740e4706882240b0d59b9ad47219e5ea5b228044b2c3ffa",
+      "inputSchemaDigest": "sha256:f3838b1e9e59e33d92192a525a3a10864dc23d31258c50a5bbc70bcecb7772cd",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -12466,7 +12466,7 @@
                       "ownerStateRef": {
                         "maxLength": 500,
                         "minLength": 1,
-                        "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                        "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                         "type": "string"
                       },
                       "version": {
@@ -12741,7 +12741,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:3f29fea1ce3e14a253af91b6c8626c43ba85911038c14b8684eec1cdb9bed18d",
+      "inputSchemaDigest": "sha256:5b7efdd8906b15d340183c716ad003767b2afaa7f50b5b7e59e9882b56687253",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -14975,7 +14975,7 @@
               "ownerStateRef": {
                 "maxLength": 500,
                 "minLength": 1,
-                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                 "type": "string"
               },
               "version": {
@@ -14998,7 +14998,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:11112900ccbc784337c42cad8133b1d13841dc86c109d7c12500459764129404",
+      "inputSchemaDigest": "sha256:f29c8e87c050632f7c0d0cd33d7b3c17f5836a9c09e7e6ea83d106e8daa36c42",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -16127,7 +16127,7 @@
                   "ownerStateRef": {
                     "maxLength": 500,
                     "minLength": 1,
-                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                    "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                     "type": "string"
                   },
                   "version": {
@@ -16187,7 +16187,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:5c5b60d80867223ac5fbd50f4a00b0df344c2a2c2da698e101e1a3759ce7b919",
+      "inputSchemaDigest": "sha256:b4c6b07a902e31fff29407321eec6e0b42fc6a558009397bf4765387c1273689",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -17015,7 +17015,7 @@
                       "ownerStateRef": {
                         "maxLength": 500,
                         "minLength": 1,
-                        "pattern": "^[a-z][a-z0-9-]*:[^\\s{}[\\]\"']+$",
+                        "pattern": "^[a-z][a-z0-9-]*:[^\\s{}\\[\\]\"']+$",
                         "type": "string"
                       },
                       "version": {
@@ -17228,7 +17228,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:a64fc33da2e3a19e6b24a0d5b317ca946eff77f0321837e4f1c3f5daa877d5ea",
+      "inputSchemaDigest": "sha256:4f92c94641da0f3cb57d00eaf585c68219ffb9005aa2c19558cf3931e0fb5d2a",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,

@@ -5,6 +5,7 @@ import {
   type EvolutionExplorationRequestV1,
   type EvolutionPreparationMediaRequestV1,
   type EvolutionPreparationReviewRequestV1,
+  OWNER_STATE_REF_PREFIX_PATTERN,
   type OwnerTruthRefV1,
   ownerTruthRefV1Schema,
 } from '@cat-cafe/shared';
@@ -68,7 +69,7 @@ function normalizedDescriptor(adapter: ProgramAdapter): ProgramAdapterDescriptor
     descriptor.schemaVersion !== 1 ||
     descriptor.adapterId.trim().length === 0 ||
     descriptor.targetOwnerFeatureId.trim().length === 0 ||
-    !/^[a-z][a-z0-9-]*:[^\s{}[\]"']*$/.test(descriptor.targetStateRefPrefix)
+    !OWNER_STATE_REF_PREFIX_PATTERN.test(descriptor.targetStateRefPrefix)
   ) {
     throw new Error('program adapter requires a complete v1 descriptor');
   }
