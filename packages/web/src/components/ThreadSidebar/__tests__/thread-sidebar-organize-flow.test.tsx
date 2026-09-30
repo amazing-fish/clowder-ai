@@ -602,6 +602,51 @@ describe('ThreadSidebar ✨ organize flow', () => {
     (useLabelStore as unknown as LabelStoreExt).setState({ labels: testData.TEST_LABELS });
   });
 
+  it('starts every round in a fresh thread and never lists organizer threads as uncategorized', async () => {
+    // A previous round's organizer thread already exists in the sidebar (legacy fixed title).
+    const previousOrganizer = { ...ORGANIZER_THREAD, id: 'org-old' };
+    mockStore.threads = [makeThread('t1'), previousOrganizer];
+
+    const createdTitles: string[] = [];
+    const triggers: Array<{ threadId: string; content: string }> = [];
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/threads' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { title: string };
+        createdTitles.push(body.title);
+        return jsonOk({ ...ORGANIZER_THREAD, id: `org-new-${createdTitles.length}`, title: body.title });
+      }
+      if (path === '/api/messages' && init?.method === 'POST') {
+        triggers.push(JSON.parse(String(init.body)) as { threadId: string; content: string });
+        return jsonOk({ id: 'msg-trigger', ok: true });
+      }
+      if (path.startsWith('/api/messages?')) return jsonOk({ messages: [] });
+      if (path === '/api/threads?view=sidebar') {
+        return jsonOk({ threads: [makeThread('t1'), previousOrganizer] });
+      }
+      return defaultSidebarApiMock(path);
+    });
+
+    await harness.render();
+    await act(async () => {
+      findOrganizeButton(harness.container)!.click();
+    });
+    await harness.flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    await harness.flush();
+
+    expect(createdTitles).toHaveLength(1);
+    expect(createdTitles[0]).toMatch(/^Thread 整理助手 · \d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]?.threadId).toBe('org-new-1');
+    expect(triggers[0]?.threadId).not.toBe('org-old');
+    // The trigger has no @ so it routes to the default cat, and organizer threads are not content.
+    expect(triggers[0]?.content).not.toMatch(/(^|\n)@/);
+    expect(triggers[0]?.content).toContain('id: "t1"');
+    expect(triggers[0]?.content).not.toContain('org-old');
+  });
+
   it('shows error toast when trigger message fails', async () => {
     mockStore.threads = [makeThread('t1')];
 

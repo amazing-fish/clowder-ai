@@ -32,6 +32,7 @@ import {
 import { orderAttentionList } from './attention-list-order';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
+import { buildOrganizerThreadTitle, isOrganizerThreadTitle } from './organizer-thread';
 import {
   SearchGroupAction,
   SearchGroupFeedback,
@@ -668,7 +669,10 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     return filteredThreads.filter((t) => t.labels?.includes(labelFilter));
   }, [filteredThreads, labelFilter]);
 
-  const labelAssignableThreads = useMemo(() => liveThreads.filter((t) => t.id !== 'default'), [liveThreads]);
+  const labelAssignableThreads = useMemo(
+    () => liveThreads.filter((t) => t.id !== 'default' && !isOrganizerThreadTitle(t.title)),
+    [liveThreads],
+  );
 
   const uncategorizedCount = useMemo(
     () => labelAssignableThreads.filter((t) => !t.labels || t.labels.length === 0).length,
@@ -685,8 +689,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     () => labelAssignableThreads.filter((t) => !t.labels || t.labels.length === 0),
     [labelAssignableThreads],
   );
-
-  const ORGANIZER_TITLE = 'Thread 整理助手';
 
   const buildTriggerContent = useCallback(() => {
     const uncatList = uncategorizedThreads
@@ -724,14 +726,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     ].join('\n');
   }, [labels, uncategorizedThreads]);
 
-  const findOrCreateOrganizerThread = useCallback(async () => {
-    const existing = useSidebarProjectionStore.getState().rows.find((thread) => thread.title === ORGANIZER_TITLE);
-    if (existing) return existing;
-
+  // Fresh thread every round → fresh session + default-cat routing (see organizer-thread.ts).
+  const createOrganizerThread = useCallback(async () => {
     const res = await apiFetch('/api/threads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: ORGANIZER_TITLE }),
+      body: JSON.stringify({ title: buildOrganizerThreadTitle() }),
     });
     if (!res.ok) throw new Error(`${res.status}`);
     const created = await res.json();
@@ -772,7 +772,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     setSuggestLoading(true);
     setSuggestions(undefined);
     try {
-      const target = await findOrCreateOrganizerThread();
+      const target = await createOrganizerThread();
       const threadId = target.id;
       const sentAt = Date.now();
 
@@ -817,13 +817,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     } finally {
       setSuggestLoading(false);
     }
-  }, [findOrCreateOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
+  }, [createOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
 
   const handleSuggestAll = useCallback(async () => {
     setSuggestLoading(true);
     setSuggestions(undefined);
     try {
-      const target = await findOrCreateOrganizerThread();
+      const target = await createOrganizerThread();
       const threadId = target.id;
       const sentAt = Date.now();
 
@@ -861,7 +861,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     } finally {
       setSuggestLoading(false);
     }
-  }, [findOrCreateOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
+  }, [createOrganizerThread, buildTriggerContent, parseSuggestionsJson]);
 
   const handleBatchApplyLabels = useCallback(async (assignments: Map<string, string[]>) => {
     const { batchApplyLabels, createAndResolveLabels } = await import('@/utils/batch-apply-labels');
