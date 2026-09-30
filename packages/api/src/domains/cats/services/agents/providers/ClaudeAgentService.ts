@@ -62,8 +62,10 @@ import {
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { createMcpSchemaDeliveryHealthLogger } from './mcp-schema-delivery-health-log.js';
 
 const log = createModuleLogger('claude-agent');
+const logSchemaDeliveryHealth = createMcpSchemaDeliveryHealthLogger(log);
 
 const PERMISSION_MODE = 'bypassPermissions';
 const RESERVED_SYSTEM_PROMPT_FLAGS = new Set([
@@ -727,7 +729,7 @@ export class ClaudeAgentService implements AgentService {
           profileId: schemaDeliveryProfile,
           hostSurface: resolveMcpSchemaDeliveryDiscoverySurface({ provider: 'anthropic', carrier: 'print_sdk' }),
         }),
-        onHealthEvent: (event) => log.warn({ event }, 'F153 MCP schema delivery capability unknown'),
+        onHealthEvent: logSchemaDeliveryHealth,
       });
       const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
         v: 1,

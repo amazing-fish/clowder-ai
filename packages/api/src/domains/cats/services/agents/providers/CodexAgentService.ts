@@ -157,6 +157,7 @@ import {
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { createMcpSchemaDeliveryHealthLogger } from './mcp-schema-delivery-health-log.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -165,6 +166,7 @@ import {
 } from './session-credential-file.js';
 
 const log = createModuleLogger('codex-agent');
+const logSchemaDeliveryHealth = createMcpSchemaDeliveryHealthLogger(log);
 
 interface CodexProviderRecoveryTracker {
   attempts: string[];
@@ -1971,7 +1973,7 @@ export class CodexAgentService implements AgentService {
             carrier: useAppServer ? 'app_server' : 'exec_json',
           }),
         }),
-        onHealthEvent: (event) => log.warn({ event }, 'F153 MCP schema delivery capability unknown'),
+        onHealthEvent: logSchemaDeliveryHealth,
       });
       const prepareProviderRequest = (
         body: string,
