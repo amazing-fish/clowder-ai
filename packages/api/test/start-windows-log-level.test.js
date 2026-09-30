@@ -23,7 +23,7 @@ function bindLogLevel(value) {
     writeFileSync(file, `${launcherPrologue()}\nWrite-Output "LL=[$LogLevel]"\n`, 'utf8');
     const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file];
     if (value !== undefined) args.push('-LogLevel', value);
-    return execFileSync('powershell.exe', args, { encoding: 'utf8' }).trim();
+    return execFileSync('powershell.exe', args, { encoding: 'utf8', windowsHide: true }).trim();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
