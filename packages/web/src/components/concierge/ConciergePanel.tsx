@@ -13,6 +13,7 @@ import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { type ThreadChatActivity, ThreadChatSurface } from '../thread-chat';
 import { ConciergePanelHeader, ConciergePanelResizeHandles } from './ConciergePanelChrome';
+import { sealActiveConciergeSessions } from './concierge-session-reset';
 import { useConciergeConfirmations } from './useConciergeConfirmations';
 import { usePanelWidth } from './usePanelWidth';
 
@@ -57,6 +58,18 @@ export function ConciergePanel() {
   useEffect(() => {
     if (surfaceState === 'bubble') void fetchThreadId();
   }, [fetchThreadId, surfaceState]);
+
+  // New round per bubble open: seal stale cat sessions once threadId is known.
+  const sessionResetDoneRef = useRef(false);
+  useEffect(() => {
+    if (surfaceState !== 'bubble') {
+      sessionResetDoneRef.current = false;
+      return;
+    }
+    if (!threadId || sessionResetDoneRef.current) return;
+    sessionResetDoneRef.current = true;
+    void sealActiveConciergeSessions(threadId);
+  }, [surfaceState, threadId]);
 
   useEffect(() => {
     if (surfaceState !== 'bubble' || pendingPrompt === null) return;
