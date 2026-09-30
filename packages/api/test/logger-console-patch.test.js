@@ -14,10 +14,10 @@ function readAllLogs() {
   return files.map((f) => readFileSync(join(TEST_LOG_DIR, f), 'utf-8')).join('\n');
 }
 
-function runLoggerScript(snippet) {
+function runLoggerScript(snippet, logLevel = 'debug') {
   const script = `
     process.env.LOG_DIR = ${JSON.stringify(TEST_LOG_DIR)};
-    process.env.LOG_LEVEL = 'debug';
+    process.env.LOG_LEVEL = ${JSON.stringify(logLevel)};
     const mod = await import('./dist/infrastructure/logger.js');
     ${snippet}
     await new Promise(r => setTimeout(r, 1500));
@@ -92,5 +92,43 @@ describe('fix(#185): console→Pino patch', () => {
     assert.equal(lines.length, 1, 'stdout should only contain one structured log line');
     assert.ok(lines[0].includes('"msg":"stdout-once-marker-185"'), 'stdout should keep the pino JSON entry');
     assert.notEqual(lines[0], 'stdout-once-marker-185', 'raw console output should not be duplicated');
+  });
+
+  // The logger threshold drops to `measure` so the file keeps measurements;
+  // the stderr echo must still follow the terminal (stdout) threshold.
+  const CONSOLE_ALL = `
+    console.log('log-marker-thr');
+    console.info('info-marker-thr');
+    console.warn('warn-marker-thr');
+    console.error('error-marker-thr');
+  `;
+
+  it('LOG_LEVEL=warn: stderr echoes warn/error only; file keeps every console level', () => {
+    resetLogDir();
+    const { stderr } = runLoggerScript(CONSOLE_ALL, 'warn');
+    assert.ok(!stderr.includes('log-marker-thr'), 'console.log must not echo below warn');
+    assert.ok(!stderr.includes('info-marker-thr'), 'console.info must not echo below warn');
+    assert.ok(stderr.includes('[console.warn] warn-marker-thr'));
+    assert.ok(stderr.includes('[console.error] error-marker-thr'));
+    const content = readAllLogs();
+    for (const marker of ['log-marker-thr', 'info-marker-thr', 'warn-marker-thr', 'error-marker-thr']) {
+      assert.ok(content.includes(marker), `${marker} should still reach the log file`);
+    }
+  });
+
+  it('LOG_LEVEL=error: stderr echoes console.error only', () => {
+    resetLogDir();
+    const { stderr } = runLoggerScript(CONSOLE_ALL, 'error');
+    assert.ok(!stderr.includes('info-marker-thr'));
+    assert.ok(!stderr.includes('warn-marker-thr'), 'console.warn must not echo below error');
+    assert.ok(stderr.includes('[console.error] error-marker-thr'));
+  });
+
+  it('LOG_LEVEL=silent: no stderr echo and no log lines', () => {
+    resetLogDir();
+    const { stdout, stderr } = runLoggerScript(CONSOLE_ALL, 'silent');
+    assert.ok(!stderr.includes('-marker-thr'), 'silent must not echo any console call');
+    assert.ok(!stdout.includes('-marker-thr'));
+    assert.ok(!readAllLogs().includes('-marker-thr'), 'silent must not write console calls to file');
   });
 });

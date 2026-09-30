@@ -153,14 +153,21 @@ function sanitizeArg(value: unknown, seen?: WeakSet<object>): unknown {
 type ConsolePinoLevel = 'info' | 'warn' | 'error' | 'debug';
 type ConsoleMethodLabel = 'log' | 'warn' | 'error' | 'info' | 'debug';
 
+/**
+ * The logger threshold may sit below the terminal's (`measure` for the file),
+ * so the stderr echo checks the stdout target threshold separately.
+ */
+const STDOUT_LEVEL_VALUE = logger.levels.values[TARGET_LEVELS.stdout];
+
 function consoleToPino(level: ConsolePinoLevel, stderrLabel: ConsoleMethodLabel): (...args: unknown[]) => void {
+  const echoToTerminal = logger.levels.values[level] >= STDOUT_LEVEL_VALUE;
   return (...args: unknown[]) => {
-    // Respect LOG_LEVEL for the stderr echo too (console.debug used to bypass it).
+    // Pino gate covers every target (and `silent`); console.debug used to bypass it.
     if (!consoleLogger.isLevelEnabled(level)) return;
     const sanitized = args.map((arg) => sanitizeArg(arg));
     const msg = utilFormat(...sanitized);
     consoleLogger[level](msg);
-    process.stderr.write(`[console.${stderrLabel}] ${msg}\n`);
+    if (echoToTerminal) process.stderr.write(`[console.${stderrLabel}] ${msg}\n`);
   };
 }
 
