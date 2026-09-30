@@ -47,7 +47,7 @@ before(async () => {
   await mkdir(EVIDENCE_DIR, { recursive: true });
   const port = await findFreePort();
   environment = await createNextDevTestEnvironment('f293-team', { NEXT_PUBLIC_API_URL: '' });
-  server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+  server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
     env: environment.env,
     stdio: ['ignore', 'pipe', 'pipe'],

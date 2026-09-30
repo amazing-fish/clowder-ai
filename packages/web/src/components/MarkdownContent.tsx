@@ -164,7 +164,7 @@ function withMentions(children: ReactNode): ReactNode {
 /* ── Code block with copy button ───────────────────────────── */
 function CodeBlock({ children }: { children: ReactNode }) {
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const preRef = useRef<HTMLPreElement>(null);
 
   const handleCopy = useCallback(() => {

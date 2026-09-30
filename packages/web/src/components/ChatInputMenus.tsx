@@ -62,7 +62,7 @@ interface ChatInputMenusProps {
   onSelectIdx: (i: number) => void;
   onInsertMention: (opt: CatOption) => void;
   onSendCommand: (command: string) => void;
-  menuRef: RefObject<HTMLDivElement>;
+  menuRef: RefObject<HTMLDivElement | null>;
 }
 
 export function ChatInputMenus({

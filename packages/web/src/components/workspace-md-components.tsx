@@ -12,7 +12,8 @@ type MentionFn = (children: import('react').ReactNode) => import('react').ReactN
 export function createWorkspaceImageComponent(basePath: string, worktreeId: string): Components['img'] {
   return function WorkspaceImage({ src, alt }) {
     const isRelative =
-      src &&
+      typeof src === 'string' &&
+      src.length > 0 &&
       !src.startsWith('http://') &&
       !src.startsWith('https://') &&
       !src.startsWith('data:') &&

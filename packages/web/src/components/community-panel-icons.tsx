@@ -1,3 +1,4 @@
+import type * as React from 'react';
 import type { JSX } from 'react';
 
 const ICON_PROPS = {
@@ -10,7 +11,7 @@ const ICON_PROPS = {
   strokeLinejoin: 'round' as const,
 };
 
-export const TYPE_ICONS: Record<string, JSX.Element> = {
+export const TYPE_ICONS: Record<string, React.JSX.Element> = {
   bug: (
     <svg {...ICON_PROPS}>
       <path d="M8 2l1.88 1.88M14.12 3.88L16 2M9 7.13v-1a3.003 3.003 0 116 0v1" />

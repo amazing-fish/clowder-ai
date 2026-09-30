@@ -132,7 +132,7 @@ test(
       CAT_CAFE_WEB_BUILD_REVISION: OLD_WEB_REVISION,
       CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: '1',
     });
-    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
       env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],

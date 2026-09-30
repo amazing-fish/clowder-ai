@@ -36,7 +36,7 @@ const threads: SidebarSnapshotRow[] = Array.from({ length: 100 }, (_, index) => 
   presence: { status: 'idle' },
 }));
 
-function Harness({ handleRef }: { handleRef: React.RefObject<VirtualThreadListHandle> }) {
+function Harness({ handleRef }: { handleRef: React.RefObject<VirtualThreadListHandle | null> }) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   return (
     <div ref={scrollContainerRef} data-testid="scroller">

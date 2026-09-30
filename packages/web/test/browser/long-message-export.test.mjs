@@ -65,7 +65,7 @@ test(
     const port = await findFreePort();
     const output = [];
     const nextDev = await createNextDevTestEnvironment('long-message-export');
-    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
       env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],

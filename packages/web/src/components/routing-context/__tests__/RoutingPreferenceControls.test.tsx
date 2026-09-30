@@ -1,8 +1,14 @@
 import type { RoutingPreferenceRevisionV1 } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('native input value setter is unavailable');
+  setter.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -85,9 +91,9 @@ describe('F293 RoutingPreferenceControls', () => {
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
     if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
     act(() => {
-      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
-      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
-      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+      setInputValue(prefer, 'opus5');
+      setInputValue(over, 'codex-sol');
+      setInputValue(rationale, '复杂终审');
     });
     await act(async () =>
       container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
@@ -112,9 +118,9 @@ describe('F293 RoutingPreferenceControls', () => {
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
     if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
     act(() => {
-      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
-      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
-      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+      setInputValue(prefer, 'opus5');
+      setInputValue(over, 'codex-sol');
+      setInputValue(rationale, '复杂终审');
     });
     await act(async () =>
       container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
@@ -140,9 +146,9 @@ describe('F293 RoutingPreferenceControls', () => {
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
     if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
     act(() => {
-      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
-      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
-      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+      setInputValue(prefer, 'opus5');
+      setInputValue(over, 'codex-sol');
+      setInputValue(rationale, '复杂终审');
     });
     await act(async () =>
       container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
@@ -207,9 +213,9 @@ describe('F293 RoutingPreferenceControls', () => {
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
     if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
     act(() => {
-      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
-      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
-      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+      setInputValue(prefer, 'opus5');
+      setInputValue(over, 'codex-sol');
+      setInputValue(rationale, '复杂终审');
     });
     const form = container.querySelector('form');
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -230,13 +236,13 @@ describe('F293 RoutingPreferenceControls', () => {
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
     if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
     act(() => {
-      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
-      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
-      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+      setInputValue(prefer, 'opus5');
+      setInputValue(over, 'codex-sol');
+      setInputValue(rationale, '复杂终审');
     });
     const form = container.querySelector('form');
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    act(() => Simulate.change(rationale, { target: { value: '架构终审' } } as never));
+    act(() => setInputValue(rationale, '架构终审'));
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
     expect(mocks.create.mock.calls[0]?.[0].commandId).not.toBe(mocks.create.mock.calls[1]?.[0].commandId);

@@ -59,7 +59,7 @@ export async function startSearchGroupBrowserFixture() {
     const port = await availablePort();
     const webUrl = `http://127.0.0.1:${port}`;
     let output = '';
-    server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+    server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
       env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -3,7 +3,7 @@ import { DesktopUpdatePromptContent } from './DesktopUpdatePromptContent';
 
 interface DesktopUpdatePromptDialogProps {
   prompt: DesktopUpdatePromptPayload;
-  dialogRef: RefObject<HTMLElement>;
+  dialogRef: RefObject<HTMLElement | null>;
   sendAction: (action: DesktopUpdatePromptAction) => void;
 }
 

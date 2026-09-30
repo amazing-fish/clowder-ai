@@ -22,7 +22,7 @@ export interface VirtualThreadListHandle {
 
 interface VirtualThreadListProps {
   threads: SidebarSnapshotRow[];
-  scrollContainerRef: RefObject<HTMLDivElement>;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
   renderItem: (thread: SidebarSnapshotRow) => ReactNode;
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import type { GlobalArtifactDTO, ThreadArtifactDTO, ThreadArtifactType } from '@cat-cafe/shared';
+import type * as React from 'react';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
@@ -107,7 +108,7 @@ const IconChevron = ({ open }: { open: boolean }) => (
   </svg>
 );
 
-const TYPE_ICON: Record<ThreadArtifactType, () => JSX.Element> = {
+const TYPE_ICON: Record<ThreadArtifactType, () => React.JSX.Element> = {
   image: IconImage,
   file: IconFile,
   code: IconCode,

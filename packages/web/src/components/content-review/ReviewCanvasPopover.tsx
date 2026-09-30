@@ -15,8 +15,8 @@ export function ReviewCanvasPopover({
 }: {
   anchor: ArtifactReviewAnchor;
   media: ImmutableMedia;
-  canvasRef: RefObject<HTMLDivElement>;
-  containerRef: RefObject<HTMLDivElement>;
+  canvasRef: RefObject<HTMLDivElement | null>;
+  containerRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
   children: ReactNode;
 }) {

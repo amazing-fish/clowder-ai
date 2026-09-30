@@ -10,8 +10,8 @@ describe('chat route markers', () => {
     expect(html).toContain('data-thread-route="default"');
   });
 
-  it('renders the active thread id into the page tree', () => {
-    const html = renderToStaticMarkup(<ThreadPage params={{ threadId: 'thread-123' }} />);
+  it('renders the active thread id into the page tree', async () => {
+    const html = renderToStaticMarkup(await ThreadPage({ params: Promise.resolve({ threadId: 'thread-123' }) }));
     expect(html).toContain('data-thread-route="thread-123"');
   });
 

@@ -129,7 +129,7 @@ export function OverviewPanel() {
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const editableVars = useMemo(() => filterTelemetryEditable(envVars), [envVars]);
   const configVars = useMemo(() => getTelemetryConfigVars(envVars), [envVars]);

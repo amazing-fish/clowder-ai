@@ -44,7 +44,7 @@ const rows: AttentionListRow[] = threads.map((thread) => ({
   thread,
 }));
 
-function Harness({ handleRef }: { handleRef: React.RefObject<VirtualThreadListHandle> }) {
+function Harness({ handleRef }: { handleRef: React.RefObject<VirtualThreadListHandle | null> }) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   return (
     <div ref={scrollContainerRef} data-testid="scroller">

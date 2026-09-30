@@ -49,8 +49,8 @@ describe('ScrollToBottomButton', () => {
   it('hidden when already at bottom; shows when scrolled up; click scrolls to bottom', async () => {
     const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
 
-    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement>;
-    const endRef = { current: endEl } as React.RefObject<HTMLElement>;
+    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement | null>;
+    const endRef = { current: endEl } as React.RefObject<HTMLElement | null>;
 
     act(() => {
       root.render(
@@ -84,8 +84,8 @@ describe('ScrollToBottomButton', () => {
   it('recomputes visibility when thread/content changes without scroll events (cloud P2)', async () => {
     const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
 
-    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement>;
-    const endRef = { current: endEl } as React.RefObject<HTMLElement>;
+    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement | null>;
+    const endRef = { current: endEl } as React.RefObject<HTMLElement | null>;
 
     // Start scrolled up → visible
     defineNumberProp(scrollEl, 'scrollTop', 0);
@@ -121,8 +121,8 @@ describe('ScrollToBottomButton', () => {
   it('recomputes visibility on local layout change events (cloud P2)', async () => {
     const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
 
-    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement>;
-    const endRef = { current: endEl } as React.RefObject<HTMLElement>;
+    const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement | null>;
+    const endRef = { current: endEl } as React.RefObject<HTMLElement | null>;
 
     // At bottom → hidden
     defineNumberProp(scrollEl, 'scrollTop', 200);
@@ -165,8 +165,8 @@ describe('ScrollToBottomButton', () => {
     (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = TestIntersectionObserver as unknown;
 
     try {
-      const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement>;
-      const endRef = { current: endEl } as React.RefObject<HTMLElement>;
+      const scrollRef = { current: scrollEl } as React.RefObject<HTMLElement | null>;
+      const endRef = { current: endEl } as React.RefObject<HTMLElement | null>;
 
       // Start at bottom → hidden
       defineNumberProp(scrollEl, 'scrollTop', 200);

@@ -72,7 +72,7 @@ export function ReviewMedia({
       }
     | undefined;
   onUnavailable: () => void;
-  canvasRef?: RefObject<HTMLDivElement>;
+  canvasRef?: RefObject<HTMLDivElement | null>;
   savedMarks?: ArtifactReviewVisualMark[];
 }) {
   const { src, error, setError } = useReviewMediaSource(reviewId, round, onUnavailable);

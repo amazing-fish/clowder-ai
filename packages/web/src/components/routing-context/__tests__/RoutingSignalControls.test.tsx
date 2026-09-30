@@ -1,7 +1,13 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Simulate } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('native input value setter is unavailable');
+  setter.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 const mocks = vi.hoisted(() => ({ mark: vi.fn() }));
 vi.mock('../routing-context-client', () => ({
@@ -42,7 +48,7 @@ describe('F293 RoutingSignalControls', () => {
     const reason = container.querySelector<HTMLInputElement>('[name="signal-reason"]');
     const form = container.querySelector<HTMLFormElement>('form');
     if (!reason) throw new Error('signal reason input was not rendered');
-    act(() => Simulate.change(reason, { target: { value: 'owner-maintenance' } } as never));
+    act(() => setInputValue(reason, 'owner-maintenance'));
     expect(container.textContent).toContain('影响 1 位成员：codex-sol');
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
@@ -90,7 +96,7 @@ describe('F293 RoutingSignalControls', () => {
     const reason = container.querySelector<HTMLInputElement>('[name="signal-reason"]');
     const form = container.querySelector<HTMLFormElement>('form');
     if (!reason) throw new Error('signal reason input was not rendered');
-    act(() => Simulate.change(reason, { target: { value: 'quota-window' } } as never));
+    act(() => setInputValue(reason, 'quota-window'));
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
     expect(mocks.mark).toHaveBeenCalledOnce();

@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import type * as React from 'react';
 import { lazy, Suspense, useCallback, useState } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
@@ -104,7 +105,7 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
   );
 }
 
-const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
+const ICON_MAP: Record<string, ({ className }: { className?: string }) => React.JSX.Element> = {
   home: ChatIcon,
   starry: PlanetIcon,
   signals: SignalIcon,

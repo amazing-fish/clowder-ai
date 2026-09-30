@@ -17,7 +17,7 @@ export function useAttentionListOrder(
   query: string,
   arranging: boolean,
 ): Record<string, AttentionListRow[]> {
-  const committed = useRef<{ scope: string; snapshots: Record<string, AttentionOrderSnapshot> }>();
+  const committed = useRef<{ scope: string; snapshots: Record<string, AttentionOrderSnapshot> } | undefined>(undefined);
   const { snapshots, rows } = useMemo(() => {
     const previous = committed.current?.scope === scope ? committed.current.snapshots : {};
     const snapshots: Record<string, AttentionOrderSnapshot> = {};

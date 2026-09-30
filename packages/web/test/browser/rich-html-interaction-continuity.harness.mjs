@@ -159,7 +159,7 @@ export function createContinuityHarness() {
     const port = await findFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
     nextDev = await createNextDevTestEnvironment('rich-html-continuity', { NEXT_PUBLIC_API_URL: baseUrl });
-    server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+    server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
       env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],

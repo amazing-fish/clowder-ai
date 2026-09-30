@@ -21,7 +21,7 @@ export function useReviewMediaSelection({
   canAnnotate: boolean;
   selected: ArtifactReviewAnchor | null;
   onSelect: (anchor: ArtifactReviewAnchor) => void;
-  stage: RefObject<HTMLDivElement>;
+  stage: RefObject<HTMLDivElement | null>;
   frame: ReviewMarkupFrame | null;
   identity: string;
 }) {

@@ -27,7 +27,15 @@ before(async () => {
     });
     server = spawn(
       process.execPath,
-      [path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next'), 'dev', '-H', '127.0.0.1', '-p', String(port)],
+      [
+        path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next'),
+        'dev',
+        '--webpack',
+        '-H',
+        '127.0.0.1',
+        '-p',
+        String(port),
+      ],
       { cwd: WEB_ROOT, env: environment.env, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const output = [];

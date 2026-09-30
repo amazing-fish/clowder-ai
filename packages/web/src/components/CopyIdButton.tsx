@@ -5,7 +5,7 @@ import { useCallback, useRef, useState } from 'react';
 /** Hover-visible button that copies messageId to clipboard. */
 export function CopyIdButton({ messageId }: { messageId: string }) {
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleClick = useCallback(async () => {
     try {

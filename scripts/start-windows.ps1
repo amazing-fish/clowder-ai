@@ -618,7 +618,7 @@ try {
             Set-Location (Join-Path $root "packages/web")
             $env:PORT = $port
             $env:NEXT_IGNORE_INCORRECT_LOCKFILE = "1"
-            & node $nextCli dev -p $port 2>&1
+            & node $nextCli dev --webpack -p $port 2>&1
         } -ArgumentList $ProjectRoot, $WebPort, $nextCli
     } else {
         # Production mode: next start (default - avoids #105 issues)

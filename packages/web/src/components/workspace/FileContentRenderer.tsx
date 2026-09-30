@@ -23,7 +23,7 @@ export interface FileContentRendererProps {
   scrollToLine: number | null;
   worktreeId: string | null;
   currentWorktree?: WorktreeEntry;
-  mdContainerRef: React.RefObject<HTMLDivElement>;
+  mdContainerRef: React.RefObject<HTMLDivElement | null>;
   mdSelectionAction: MarkdownSelectionAction | null;
   onMdAddToChat: (action: MarkdownSelectionAction, comment: string) => void;
   onSave: (c: string) => Promise<void>;

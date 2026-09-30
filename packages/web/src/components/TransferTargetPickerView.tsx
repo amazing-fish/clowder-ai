@@ -9,7 +9,7 @@ import {
 
 interface TransferTargetPickerViewProps {
   isDesktop: boolean;
-  panelRef: RefObject<HTMLDivElement>;
+  panelRef: RefObject<HTMLDivElement | null>;
   targetThreadId: string | null;
   targetThreadTitle?: string | null;
   availableThreads: readonly TransferThreadChoice[];

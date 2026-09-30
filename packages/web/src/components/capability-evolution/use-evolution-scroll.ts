@@ -4,7 +4,7 @@ import { DEFAULT_READING, type EvolutionReading, useEvolutionReading } from './e
 /** Scrolling stays outside the subscribed store; navigation and page departure commit the last position. */
 export function useEvolutionScroll(programId: string, view: keyof EvolutionReading['scroll'], ready: boolean) {
   const viewport = useRef<HTMLDivElement>(null);
-  const pending = useRef<number>();
+  const pending = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     if (!ready || !viewport.current) return;
     viewport.current.scrollTop = (useEvolutionReading.getState().programs[programId] ?? DEFAULT_READING).scroll[view];

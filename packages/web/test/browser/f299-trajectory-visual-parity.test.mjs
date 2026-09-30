@@ -58,7 +58,7 @@ before(async () => {
   const port = await findFreePort();
   const output = [];
   nextDev = await createNextDevTestEnvironment('f299-trajectory-parity');
-  server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+  server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
     env: nextDev.env,
     stdio: ['ignore', 'pipe', 'pipe'],

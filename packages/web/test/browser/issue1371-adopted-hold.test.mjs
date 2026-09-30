@@ -27,7 +27,15 @@ before(async () => {
     });
     server = spawn(
       process.execPath,
-      [path.resolve(webRoot, '../../node_modules/next/dist/bin/next'), 'dev', '-H', '127.0.0.1', '-p', String(port)],
+      [
+        path.resolve(webRoot, '../../node_modules/next/dist/bin/next'),
+        'dev',
+        '--webpack',
+        '-H',
+        '127.0.0.1',
+        '-p',
+        String(port),
+      ],
       { cwd: webRoot, env: environment.env, stdio: 'ignore' },
     );
     url = `http://127.0.0.1:${port}/dev/issue1371-adopted-hold`;

@@ -15,7 +15,7 @@ interface AssetSidebarProps {
   dispatch: (action: AssetCollaborationAction) => void;
   onSendAnnotation: () => void;
   onSendDiscussion: () => void;
-  scrollRef: RefObject<HTMLDivElement>;
+  scrollRef: RefObject<HTMLDivElement | null>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
 }
 

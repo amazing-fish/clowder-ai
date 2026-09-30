@@ -295,7 +295,7 @@ function projectSelectionAction(
 }
 
 export function useTextSelectionAction(
-  containerRef: RefObject<HTMLElement>,
+  containerRef: RefObject<HTMLElement | null>,
   active: boolean,
   resetKey: string | null,
   coordinateSpace: 'container' | 'viewport' = 'container',

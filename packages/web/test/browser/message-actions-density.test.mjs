@@ -330,7 +330,7 @@ before(async () => {
     'the Next dev child must not share the production .next directory',
   );
   serverOutput = [];
-  server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+  server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
     env: nextDevEnvironment,
     stdio: ['ignore', 'pipe', 'pipe'],

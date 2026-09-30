@@ -3,7 +3,7 @@ import { type RefObject, useCallback, useEffect, useRef } from 'react';
 interface TransferPickerLifecycleInput {
   open: boolean;
   atCatStep: boolean;
-  panelRef: RefObject<HTMLDivElement>;
+  panelRef: RefObject<HTMLDivElement | null>;
   resetPicker: () => void;
   backToThreads: () => void;
   onClose: () => void;

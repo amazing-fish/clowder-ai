@@ -7,7 +7,7 @@ function matchesPosition(frame: PresentedFrame | null, position: number) {
 }
 
 /** Seeking is a readiness signal, not a revocation of frame evidence that already belongs to that seek. */
-export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement>, src: string | null) {
+export function usePresentedVideoFrame(videoRef: RefObject<HTMLVideoElement | null>, src: string | null) {
   const [frame, setFrame] = useState<PresentedFrame | null>(null);
   const [seeking, setSeeking] = useState(false);
   useEffect(() => {

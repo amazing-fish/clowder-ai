@@ -12,7 +12,7 @@ interface CompactLabelProps {
 
 export function CompactLabel({ label, value, className = '', density = 'default' }: CompactLabelProps) {
   const tooltipId = useId();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [copied, setCopied] = useState(false);
   const { ref, overflowing } = useMeasuredOverflow<HTMLSpanElement>({
     axis: 'inline',

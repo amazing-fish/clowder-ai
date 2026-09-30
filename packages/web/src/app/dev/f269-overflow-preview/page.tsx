@@ -12,10 +12,11 @@ import { F269DesignGatePreview } from './design-gate';
 import { F269OverflowPreview } from './preview';
 
 interface F269OverflowPreviewPageProps {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default function F269OverflowPreviewPage({ searchParams }: F269OverflowPreviewPageProps) {
+export default async function F269OverflowPreviewPage(props: F269OverflowPreviewPageProps) {
+  const searchParams = await props.searchParams;
   if (process.env.NODE_ENV === 'production') notFound();
 
   if (normalizeF269PreviewView(searchParams?.view) === 'design') {

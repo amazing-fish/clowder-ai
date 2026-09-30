@@ -29,7 +29,7 @@ export function ReviewCommentComposer({
   media: ImmutableMedia;
   draft: ComposerDraft;
   saving: boolean;
-  textareaRef: RefObject<HTMLTextAreaElement>;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
   onSave: () => void;
   onClose?: () => void;
 }) {

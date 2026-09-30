@@ -105,7 +105,7 @@ export function useCallbackAuthSnapshot(options: Options = {}): UseCallbackAuthS
   const [snapshot, setSnapshot] = useState<CallbackAuthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // 砚砚 P1 #1403: generation token guards against the race where an
   // in-flight fetch resolves AFTER unmount / enabled=false and re-arms a
   // timer. Each effect run bumps the generation; fetchAndReschedule checks

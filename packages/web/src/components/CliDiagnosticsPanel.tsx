@@ -1,6 +1,7 @@
 'use client';
 
 import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
+import type * as React from 'react';
 import { useState } from 'react';
 import {
   BrainIcon,
@@ -34,7 +35,11 @@ import {
  * 4-tier severity grouping below).
  */
 
-type IconComponent = (props: { className?: string; style?: React.CSSProperties; ariaLabel?: string }) => JSX.Element;
+type IconComponent = (props: {
+  className?: string;
+  style?: React.CSSProperties;
+  ariaLabel?: string;
+}) => React.JSX.Element;
 
 interface Palette {
   /** Banner background (light-tinted) */

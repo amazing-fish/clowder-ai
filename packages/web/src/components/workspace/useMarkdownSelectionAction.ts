@@ -12,7 +12,7 @@ export interface MarkdownSelectionAction {
 }
 
 export function useMarkdownSelectionAction(
-  containerRef: RefObject<HTMLDivElement>,
+  containerRef: RefObject<HTMLDivElement | null>,
   active: boolean,
   resetKey: string | null,
 ): MarkdownSelectionAction | null {

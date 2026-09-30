@@ -70,7 +70,7 @@ export function CollectiveLaunchSurface({
   readonly initialServiceUrl?: string;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const selectedConnectionRef = useRef<string>();
+  const selectedConnectionRef = useRef<string | undefined>(undefined);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>();
   const [status, setStatus] = useState<CollectiveConnectorStatus>();
   const [serviceInput, setServiceInput] = useState(initialServiceUrl);
@@ -83,8 +83,8 @@ export function CollectiveLaunchSurface({
   const [hostExperiencePendingWorkRef, setHostExperiencePendingWorkRef] = useState<CollectiveF290ExperienceWorkRef>();
   const [hostExperienceResultNotice, setHostExperienceResultNotice] = useState<string>();
   const serviceUrlRef = useRef(serviceUrl);
-  const hostExperienceWorkRefRef = useRef<CollectiveF290ExperienceWorkRef>();
-  const hostExperiencePendingWorkRefRef = useRef<CollectiveF290ExperienceWorkRef>();
+  const hostExperienceWorkRefRef = useRef<CollectiveF290ExperienceWorkRef | undefined>(undefined);
+  const hostExperiencePendingWorkRefRef = useRef<CollectiveF290ExperienceWorkRef | undefined>(undefined);
   const experienceGate =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('experienceGate') === 'f290-assembly';
@@ -224,7 +224,7 @@ export function CollectiveLaunchSurface({
   );
 
   const connection = status ? preferredConnection(status.connections, selectedConnectionId) : undefined;
-  const activeConnectionRef = useRef<string>();
+  const activeConnectionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     const previousConnectionId = activeConnectionRef.current;
     if (previousConnectionId && previousConnectionId !== connection?.connectionId) closeHostExperience();

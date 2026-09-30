@@ -8,7 +8,7 @@ import { useComposerContextAttachments } from './useComposerContextAttachments';
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
 export function useMessageAnnotationMarkers(
-  rootRef: RefObject<HTMLElement>,
+  rootRef: RefObject<HTMLElement | null>,
   threadId: string,
   messageId: string,
 ): readonly ContextAnnotationMarker[] {

@@ -18,7 +18,7 @@ export function GraphSearchForm({
   inputRef,
   onSubmit,
 }: {
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   onSubmit: (e: React.FormEvent) => void;
 }) {
   return (

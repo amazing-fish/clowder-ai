@@ -17,7 +17,7 @@ const FALLBACK_VIEWPORT_HEIGHT_PX = 640;
 
 interface VirtualAttentionListProps {
   rows: AttentionListRow[];
-  scrollContainerRef: RefObject<HTMLDivElement>;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
   renderItem: (row: AttentionListRow) => ReactNode;
 }
 

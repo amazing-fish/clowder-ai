@@ -11,7 +11,7 @@ import { normalizeCollectiveServiceUrl } from './collective-client';
 type PairingBridgeState = 'waiting' | 'ready' | 'unavailable';
 
 interface PairingBridgeOptions {
-  readonly iframeRef: RefObject<HTMLIFrameElement>;
+  readonly iframeRef: RefObject<HTMLIFrameElement | null>;
   readonly serviceUrl: string | undefined;
   readonly pair: (message: CollectivePairingIntentMessage) => void | Promise<void>;
 }

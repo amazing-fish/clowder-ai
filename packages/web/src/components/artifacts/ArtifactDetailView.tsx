@@ -1,4 +1,5 @@
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import type * as React from 'react';
 import type { JSX, ReactNode } from 'react';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { API_URL } from '@/utils/api-client';
@@ -39,7 +40,7 @@ const actionBtnClass =
 const linkBtnClass =
   'flex items-center gap-1.5 rounded-lg border border-cafe bg-cafe-surface-elevated px-3 py-1.5 text-xs font-medium text-cafe-crosspost transition-colors hover:text-cafe-accent';
 
-function PrBody({ artifact }: { artifact: ThreadArtifactDTO }): JSX.Element {
+function PrBody({ artifact }: { artifact: ThreadArtifactDTO }): React.JSX.Element {
   const prUrl = prRefToUrl(artifact.ref);
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
@@ -56,7 +57,7 @@ function PrBody({ artifact }: { artifact: ThreadArtifactDTO }): JSX.Element {
   );
 }
 
-function DownloadBody({ artifact, url }: { artifact: ThreadArtifactDTO; url: string }): JSX.Element {
+function DownloadBody({ artifact, url }: { artifact: ThreadArtifactDTO; url: string }): React.JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
       <CompactLabel
@@ -83,7 +84,7 @@ function FallbackBody({
 }: {
   artifact: ThreadArtifactDTO;
   onJump: (sourceMessageId: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
       <CompactLabel
@@ -114,7 +115,7 @@ function ArtifactTextBody({
   artifact: ThreadArtifactDTO;
   worktreeId: string | null;
   onJump: (sourceMessageId: string) => void;
-}): JSX.Element {
+}): React.JSX.Element {
   const { content, path, isMarkdown, loading, error } = useArtifactContent(artifact, worktreeId, true);
   if (loading) {
     return <div className="px-4 py-8 text-center text-xs text-cafe-muted">正文加载中…</div>;
@@ -162,7 +163,7 @@ export function ArtifactDetailView({
   onBack: () => void;
   onJump: (sourceMessageId: string) => void;
   reviewAction?: ReactNode;
-}): JSX.Element {
+}): React.JSX.Element {
   const view = classifyArtifactView(artifact);
   const url = resolveAssetUrl(artifact.url, API_URL);
 

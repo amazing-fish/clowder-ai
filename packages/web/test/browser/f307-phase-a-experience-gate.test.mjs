@@ -211,7 +211,7 @@ before(async () => {
   );
   const port = await findFreePort();
   const output = [];
-  server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+  server = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
     env: {
       ...process.env,

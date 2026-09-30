@@ -269,7 +269,7 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
       CAT_CAFE_DEPLOYMENT_ID: 'feature-test',
     });
     let output = '';
-    web = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', new URL(webUrl).port], {
+    web = spawn(process.execPath, [NEXT_BIN, 'dev', '--webpack', '-H', '127.0.0.1', '-p', new URL(webUrl).port], {
       cwd: WEB_ROOT,
       env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],
