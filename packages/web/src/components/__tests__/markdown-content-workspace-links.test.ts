@@ -96,4 +96,33 @@ describe('MarkdownContent workspace link rendering', () => {
     expect(html).toContain('在工作区中打开');
     expect(html).not.toContain('target="_blank"');
   });
+
+  describe.each([undefined, 'docs'])('unavailable links with basePath=%s', (basePath) => {
+    it.each([
+      'file:///C:/project/docs/shared-rules.md',
+      'file:///C:/project/src/governance-l0.ts',
+      'file:///C:/project/docs/report.html',
+      'javascript:alert(1)',
+      '',
+    ])('does not navigate a rejected or empty destination: %s', (href) => {
+      const html = render(`[产物](${href})`, basePath);
+      const container = document.createElement('div');
+      container.innerHTML = html;
+
+      expect(container.querySelector('a')).toBeNull();
+      expect(container.querySelector('[aria-disabled="true"]')?.textContent).toBe('产物');
+      expect(html).toContain('链接不可用');
+    });
+
+    it.each([
+      'https://example.com/report.html',
+      '/uploads/report.html',
+      '#summary',
+    ])('preserves a supported browser destination: %s', (href) => {
+      const container = document.createElement('div');
+      container.innerHTML = render(`[产物](${href})`, basePath);
+      expect(container.querySelector('a')?.getAttribute('href')).toBe(href);
+      expect(container.querySelector('[aria-disabled="true"]')).toBeNull();
+    });
+  });
 });

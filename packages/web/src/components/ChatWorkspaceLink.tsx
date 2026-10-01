@@ -3,6 +3,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MarkdownExternalLink } from './MarkdownExternalLink';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import {
   cancelActiveWorkspaceDocumentResolution,
@@ -215,8 +216,8 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
   }
 
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-conn-blue-text hover:underline break-all">
+    <MarkdownExternalLink href={href} className="text-conn-blue-text hover:underline break-all">
       {children}
-    </a>
+    </MarkdownExternalLink>
   );
 }

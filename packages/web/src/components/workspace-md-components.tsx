@@ -4,6 +4,7 @@ import type { Components } from 'react-markdown';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { isRelativeMdLink, resolveRelativePath } from './MarkdownContent';
+import { MarkdownExternalLink } from './MarkdownExternalLink';
 
 /** Highlight @mentions in text children */
 type MentionFn = (children: import('react').ReactNode) => import('react').ReactNode;
@@ -56,14 +57,12 @@ export function createWorkspaceLinkComponent(
     }
 
     return (
-      <a
+      <MarkdownExternalLink
         href={href}
-        target="_blank"
-        rel="noopener noreferrer"
         className="text-cafe-accent hover:text-cafe-interactive hover:underline break-all"
       >
         {withMentions(children)}
-      </a>
+      </MarkdownExternalLink>
     );
   };
 }
