@@ -25,13 +25,25 @@ export async function ensureProjectCollection(
   catalog: LibraryCatalog,
   stores: Map<string, IEvidenceStore>,
   dataDir: string,
-  getEmbeddingService?: () => IEmbeddingService | undefined,
+  getEmbeddingService: (() => IEmbeddingService | undefined) | undefined,
+  privateUserId: string | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
   const startMs = Date.now();
   const collectionId = deriveCollectionId(projectPath);
 
   let manifest = catalog.get(collectionId);
   let store = stores.get(collectionId) as SqliteEvidenceStore | undefined;
+  const ownerUserId = privateUserId?.trim();
+
+  if (!manifest || manifest.sensitivity === 'private' || manifest.sensitivity === 'restricted') {
+    if (!ownerUserId) throw new Error('Project collection owner identity is required');
+    if (manifest && !manifest.ownerUserId) {
+      throw new Error(`Collection ${collectionId} has no owner; explicit ownership migration is required`);
+    }
+    if (manifest && manifest.ownerUserId !== ownerUserId) {
+      throw new Error(`Collection ${collectionId} belongs to a different owner`);
+    }
+  }
 
   if (!manifest) {
     const now = new Date().toISOString();
@@ -42,6 +54,7 @@ export async function ensureProjectCollection(
       displayName: basename(projectPath),
       root: projectPath,
       sensitivity: 'private',
+      ownerUserId,
       scannerLevel: 'auto',
       indexPolicy: { autoRebuild: false },
       reviewPolicy: { authorityCeiling: 'candidate', requireOwnerApproval: false },

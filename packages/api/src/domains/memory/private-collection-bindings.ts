@@ -82,7 +82,9 @@ export async function registerPrivateAndExternalCollections(options: PrivateBind
 
   for (const externalManifest of options.externalManifests) {
     try {
-      const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
+      // Historical external collections retain their recorded owner, including an
+      // absent owner. A changed startup identity must not implicitly claim them.
+      const manifest = externalManifest;
       catalog.register(manifest);
       if (manifest.status === 'archived') continue;
       const storePath = resolveCollectionStorePath(dataDir, manifest.id);
@@ -97,17 +99,6 @@ export async function registerPrivateAndExternalCollections(options: PrivateBind
       // fail-open: skip broken external collections
     }
   }
-}
-
-function bindLegacyPrivateOwner(manifest: CollectionManifest, privateUserId?: string): CollectionManifest {
-  if (
-    privateUserId &&
-    manifest.ownerUserId == null &&
-    (manifest.sensitivity === 'private' || manifest.sensitivity === 'restricted')
-  ) {
-    return { ...manifest, ownerUserId: privateUserId };
-  }
-  return manifest;
 }
 
 /**
