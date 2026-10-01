@@ -11,7 +11,7 @@ export function resolveCollectionScanner(manifest: CollectionManifest): RepoScan
   const level = manifest.scannerLevel === 'auto' ? detectScannerLevel(manifest.root) : manifest.scannerLevel;
 
   if (level === 0) return new FlatScanner(manifest.id, manifest.exclude);
-  return new StructuredScanner(manifest.id, manifest.exclude);
+  return new StructuredScanner(manifest.id, manifest.exclude, manifest.fieldMapping);
 }
 
 export function detectScannerLevel(root: string): 0 | 1 {

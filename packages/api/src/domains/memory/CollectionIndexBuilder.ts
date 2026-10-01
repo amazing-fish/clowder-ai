@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
+import { relative } from 'node:path';
 import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
-import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
+import type {
+  CollectionScanWarning,
+  EvidenceItem,
+  IEmbeddingService,
+  RepoScanner,
+  ScannedEvidence,
+} from './interfaces.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -13,6 +20,7 @@ export interface CollectionRebuildResult {
   skipped: number;
   blocked: boolean;
   secretFindings: SecretFinding[];
+  scanWarnings?: CollectionScanWarning[];
 }
 
 export interface CollectionEmbedDeps {
@@ -92,7 +100,8 @@ export class CollectionIndexBuilder {
       }
     }
 
-    return { indexed, skipped, blocked: false, secretFindings: [] };
+    const scanWarnings = this.scanner.getWarnings?.() ?? [];
+    return { indexed, skipped, blocked: false, secretFindings: [], ...(scanWarnings.length ? { scanWarnings } : {}) };
   }
 
   async incrementalUpdate(changedPaths: string[]): Promise<void> {
@@ -103,7 +112,17 @@ export class CollectionIndexBuilder {
         filePath,
         this.manifest.root,
       );
-      if (!scanned) continue;
+      if (!scanned) {
+        const path = relative(this.manifest.root, filePath).replace(/\\/g, '/');
+        if (this.scanner.getWarnings?.().some((warning) => warning.path === path)) {
+          const rows = this.store
+            .getDb()
+            .prepare("SELECT anchor FROM evidence_docs WHERE REPLACE(source_path, char(92), '/') = ? AND anchor LIKE ?")
+            .all(path, `${this.manifest.id}:%`) as Array<{ anchor: string }>;
+          for (const row of rows) await this.store.deleteByAnchor(row.anchor);
+        }
+        continue;
+      }
       const hash = createHash('sha256').update(scanned.rawContent).digest('hex');
       const item: EvidenceItem = {
         ...scanned.item,
@@ -130,7 +149,16 @@ export class CollectionIndexBuilder {
 
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
-        if (existing?.sourceHash === hash && existing.authority === this.manifest.reviewPolicy.authorityCeiling) {
+        if (
+          existing?.sourceHash === hash &&
+          existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
+          existing.kind === result.item.kind &&
+          existing.status === result.item.status &&
+          existing.title === result.item.title &&
+          existing.summary === result.item.summary &&
+          existing.supersededBy === result.item.supersededBy &&
+          JSON.stringify(existing.keywords ?? []) === JSON.stringify(result.item.keywords ?? [])
+        ) {
           skipped++;
           continue;
         }

@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
 import type { F163Authority } from './f163-types.js';
+import { EVIDENCE_STATUSES, type EvidenceStatus } from './interfaces.js';
 
 export const COLLECTION_KINDS = ['project', 'world', 'domain', 'research', 'global'] as const;
 export type CollectionKind = (typeof COLLECTION_KINDS)[number];
@@ -19,6 +20,15 @@ export type CollectionStatus = (typeof COLLECTION_STATUSES)[number];
 export const REVIEW_STATUSES = ['unreviewed', 'partial', 'reviewed', 'stale'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 
+export interface CollectionFieldMapping {
+  /** Existing top-level frontmatter scalar used as the indexed summary. */
+  summary?: string;
+  /** Existing scalar or string-list fields merged into indexed keywords. */
+  keywords?: string[];
+  /** Explicit source status translations. Unmapped values are excluded with a warning. */
+  status?: Record<string, EvidenceStatus>;
+}
+
 export interface CollectionManifest {
   id: string;
   kind: CollectionKind;
@@ -29,6 +39,7 @@ export interface CollectionManifest {
   /** Server-owned identity binding for private/restricted recall authorization. */
   ownerUserId?: string;
   scannerLevel: 0 | 1 | 2 | 3 | 'auto';
+  fieldMapping?: CollectionFieldMapping;
   indexPolicy: {
     autoRebuild: boolean;
     rebuildIntervalMs?: number;
@@ -60,6 +71,7 @@ export function validateManifestInput(input: {
   kind: string;
   sensitivity?: string;
   scannerLevel?: number | string;
+  fieldMapping?: unknown;
   root: string;
 }): void {
   validateCollectionId(input.id);
@@ -81,6 +93,46 @@ export function validateManifestInput(input: {
 
   if (input.scannerLevel !== undefined && !VALID_SCANNER_LEVELS.has(input.scannerLevel)) {
     throw new Error(`Invalid scannerLevel: ${input.scannerLevel} — must be one of: 0, 1, 2, 3, auto`);
+  }
+
+  if (input.fieldMapping !== undefined) {
+    const mapping = input.fieldMapping;
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) {
+      throw new Error('fieldMapping must be an object');
+    }
+    const fields = mapping as Record<string, unknown>;
+    const isField = (value: unknown): value is string =>
+      typeof value === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]{0,79}$/.test(value);
+    if (Object.keys(fields).some((key) => !['summary', 'keywords', 'status'].includes(key))) {
+      throw new Error('fieldMapping supports only summary, keywords and status');
+    }
+    if (fields.summary !== undefined && !isField(fields.summary)) {
+      throw new Error('fieldMapping.summary must name a top-level frontmatter field');
+    }
+    if (
+      fields.keywords !== undefined &&
+      (!Array.isArray(fields.keywords) || fields.keywords.length > 20 || !fields.keywords.every(isField))
+    ) {
+      throw new Error('fieldMapping.keywords must contain at most 20 frontmatter field names');
+    }
+    if (fields.status !== undefined) {
+      if (
+        !fields.status ||
+        typeof fields.status !== 'object' ||
+        Array.isArray(fields.status) ||
+        Object.entries(fields.status).some(
+          ([source, target]) =>
+            !isField(source) ||
+            typeof target !== 'string' ||
+            !(EVIDENCE_STATUSES as readonly string[]).includes(target),
+        )
+      ) {
+        throw new Error('fieldMapping.status must map source status names to supported evidence statuses');
+      }
+    }
+    if (input.scannerLevel !== 1 && input.scannerLevel !== 2 && input.scannerLevel !== 3) {
+      throw new Error('fieldMapping requires explicit structured scannerLevel 1, 2 or 3');
+    }
   }
 
   const stat = statSync(input.root, { throwIfNoEntry: false });

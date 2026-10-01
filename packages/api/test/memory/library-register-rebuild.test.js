@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -22,6 +22,140 @@ describe('library register + rebuild endpoints', () => {
 
   afterEach(async () => {
     await app.close();
+    for (const store of stores.values()) store.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('persists configurable fields and rebuilds searchable CRLF source semantics', async () => {
+    const root = join(dataDir, 'source');
+    mkdirSync(root);
+    writeFileSync(
+      join(root, 'source.md'),
+      [
+        '---',
+        'assertion_text: "Calibration requires a reference label."',
+        'wake_condition: "measurement fails"',
+        'labels: [guide]',
+        'status: superseded',
+        'superseded_by: new-source',
+        '---',
+        '# Source',
+        '',
+        'Plain body.',
+      ].join('\r\n'),
+    );
+    const mapping = { summary: 'assertion_text', keywords: ['wake_condition', 'labels'] };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/library/register',
+      payload: {
+        id: 'world:mapped',
+        kind: 'world',
+        name: 'mapped',
+        displayName: 'Mapped',
+        root,
+        sensitivity: 'internal',
+        scannerLevel: 1,
+        fieldMapping: mapping,
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().manifest.fieldMapping, mapping);
+    const { loadExternalCollections } = await import('../../dist/domains/memory/external-collections.js');
+    assert.deepEqual(loadExternalCollections(dataDir)[0].fieldMapping, mapping);
+    const rebuild = await app.inject({ method: 'POST', url: '/api/library/world:mapped/rebuild' });
+    assert.equal(rebuild.statusCode, 200);
+    const found = await stores.get('world:mapped').search('calibration');
+    assert.equal(found.length, 1, 'mapped summary reaches the real index');
+    assert.equal(found[0].summary, 'Calibration requires a reference label.');
+    assert.equal(found[0].status, 'superseded');
+    assert.equal(found[0].supersededBy, 'new-source');
+    assert.ok(found[0].keywords.includes('measurement fails'));
+  });
+
+  it('rejects malformed mappings and mappings without an explicit structured level before registration', async () => {
+    for (const config of [
+      { fieldMapping: null, scannerLevel: 1 },
+      { fieldMapping: { summary: ['text'] }, scannerLevel: 1 },
+      { fieldMapping: { summary: 'nested.field' }, scannerLevel: 1 },
+      { fieldMapping: { keywords: 'labels' }, scannerLevel: 1 },
+      { fieldMapping: { unknown: 'text' }, scannerLevel: 1 },
+      { fieldMapping: { status: { dormant: 'dormant' } }, scannerLevel: 1 },
+      { fieldMapping: { status: ['active'] }, scannerLevel: 1 },
+      { fieldMapping: { summary: 'text' }, scannerLevel: 'auto' },
+      { fieldMapping: { summary: 'text' }, scannerLevel: 0 },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/library/register',
+        payload: {
+          id: 'world:invalid-mapping',
+          kind: 'world',
+          name: 'invalid',
+          displayName: 'Invalid',
+          root: dataDir,
+          sensitivity: 'internal',
+          ...config,
+        },
+      });
+      assert.equal(response.statusCode, 400, JSON.stringify(config));
+      assert.equal(catalog.list().length, 0);
+      assert.equal(stores.size, 0);
+    }
+  });
+
+  it('reports unmapped statuses and removes previously active rows on incremental update and rebuild', async () => {
+    const root = join(dataDir, 'status-source');
+    mkdirSync(root);
+    const path = join(root, 'note.md');
+    const write = (status) =>
+      writeFileSync(path, `---\nstatus: ${status}\nassertion_text: calibration reference\n---\n# Calibration\n\nBody.`);
+    write('active');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/library/register',
+      payload: {
+        id: 'world:statuses',
+        kind: 'world',
+        name: 'statuses',
+        displayName: 'Statuses',
+        root,
+        sensitivity: 'internal',
+        scannerLevel: 1,
+        fieldMapping: { summary: 'assertion_text', status: { active: 'active', superseded: 'superseded' } },
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    const manifest = catalog.get('world:statuses');
+    const store = stores.get(manifest.id);
+    const { CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js');
+    const { resolveCollectionScanner } = await import('../../dist/domains/memory/scanner-resolver.js');
+    const scanner = resolveCollectionScanner(manifest);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+    await builder.rebuild();
+    assert.equal((await store.search('calibration'))[0].status, 'active');
+    write('dormant');
+    await builder.incrementalUpdate([path]);
+    assert.deepEqual(await store.search('calibration'), []);
+    assert.deepEqual(scanner.getWarnings(), [{ code: 'unmapped_status', path: 'note.md', value: 'dormant' }]);
+    write('active');
+    await builder.rebuild();
+    assert.equal((await store.search('calibration')).length, 1);
+    write('dormant');
+    const rebuild = await app.inject({ method: 'POST', url: '/api/library/world:statuses/rebuild' });
+    assert.equal(rebuild.statusCode, 200);
+    assert.deepEqual(rebuild.json().scanWarnings, [{ code: 'unmapped_status', path: 'note.md', value: 'dormant' }]);
+    assert.deepEqual(await store.search('calibration'), []);
+    write('superseded');
+    await builder.rebuild();
+    assert.equal((await store.search('calibration'))[0].status, 'superseded');
+    manifest.fieldMapping.summary = 'missing_field';
+    await builder.rebuild();
+    assert.equal(
+      (await store.search('calibration'))[0].summary,
+      'Body.',
+      'mapping changes invalidate cached projections even when source hash is unchanged',
+    );
   });
 
   it('POST /register creates a new collection', async () => {

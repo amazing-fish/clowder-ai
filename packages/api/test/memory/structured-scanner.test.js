@@ -2,10 +2,10 @@
 // AC-B2: leverages frontmatter, WikiLinks, SUMMARY.md when present
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 describe('StructuredScanner', () => {
   let StructuredScanner;
@@ -15,6 +15,47 @@ describe('StructuredScanner', () => {
     ({ StructuredScanner } = await import('../../dist/domains/memory/StructuredScanner.js'));
     tmpDir = mkdtempSync(join(tmpdir(), 'struct-scan-'));
   });
+
+  afterEach(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  for (const eol of ['\n', '\r\n']) {
+    it(`manifest mapping preserves source semantics with ${JSON.stringify(eol)} newlines`, async () => {
+      const { resolveCollectionScanner } = await import('../../dist/domains/memory/scanner-resolver.js');
+      const raw = [
+        '---',
+        'assertion_text: "Calibration requires a reference label."',
+        'wake_condition: "When calibration fails"',
+        'labels: [Calibration, guide]',
+        'status: superseded',
+        'superseded_by: replacement',
+        '---',
+        '# Source',
+        '',
+        'Generic body paragraph.',
+        '',
+        '## Guide',
+        '',
+      ].join(eol);
+      writeFileSync(join(tmpDir, 'source.md'), raw);
+      const scanner = resolveCollectionScanner({
+        id: 'test:docs',
+        root: tmpDir,
+        scannerLevel: 1,
+        fieldMapping: { summary: 'assertion_text', keywords: ['wake_condition', 'labels'] },
+      });
+      const [result] = scanner.discover(tmpDir);
+      assert.equal(result.item.summary, 'Calibration requires a reference label.');
+      assert.ok(result.item.keywords.includes('When calibration fails'));
+      assert.ok(result.item.keywords.includes('Calibration'));
+      assert.equal(result.item.keywords.filter((x) => x.toLowerCase() === 'guide').length, 1);
+      assert.equal(result.item.status, 'superseded');
+      assert.equal(result.item.supersededBy, 'replacement');
+      assert.equal(result.rawContent, raw, 'raw source bytes remain unchanged for hashing and readback');
+      const [unmapped] = new StructuredScanner('test:docs').discover(tmpDir);
+      assert.equal(unmapped.item.summary, 'Generic body paragraph.');
+      assert.equal(unmapped.item.status, 'superseded');
+    });
+  }
 
   it('upgrades provenance to authoritative when frontmatter present', () => {
     writeFileSync(
