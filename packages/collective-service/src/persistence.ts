@@ -43,15 +43,15 @@ export class PersistentServiceState {
 
   static async load(
     dataDirectory: string,
-    prepare?: (state: ServiceState) => Promise<ServiceState>,
+    validate?: (state: ServiceState) => Promise<void>,
   ): Promise<PersistentServiceState> {
     const filePath = join(dataDirectory, SERVICE_STATE_FILE);
     await ensurePrivateDirectory(dataDirectory);
     const contents = await readPrivateFile(filePath);
     const migrated = migrateServiceState(JSON.parse(contents));
-    const prepared = prepare ? await prepare(migrated.state) : migrated.state;
-    if (migrated.migrated || prepared !== migrated.state) await writeAtomic(filePath, prepared);
-    return new PersistentServiceState(filePath, prepared);
+    await validate?.(migrated.state);
+    if (migrated.migrated) await writeAtomic(filePath, migrated.state);
+    return new PersistentServiceState(filePath, migrated.state);
   }
 
   snapshot(): ServiceState {

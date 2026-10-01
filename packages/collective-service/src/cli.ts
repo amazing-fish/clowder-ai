@@ -39,11 +39,6 @@ async function main(): Promise<void> {
     bootstrapLinkPath,
     githubAppSetup,
   });
-  if (opened.bootstrapReissued) {
-    process.stdout.write(
-      `${JSON.stringify({ event: 'bootstrap-reissued', serviceInstanceId: opened.store.serviceInstanceId })}\n`,
-    );
-  }
   process.stdout.write(
     `${JSON.stringify({
       event: 'collective-service-ready',

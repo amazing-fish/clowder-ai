@@ -1,7 +1,7 @@
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COLLECTIVE_CLIENT_BUILD_ID } from '@cat-cafe/collective-client';
-import { prepareStartupBootstrap, writeBootstrapLink } from './bootstrap-startup.js';
+import { validateStartupBootstrap, writeBootstrapLink } from './bootstrap-startup.js';
 import { CollectiveConnectionEventStore, type PairingExchangeInput } from './connection-event-store.js';
 import { CollectiveServiceError } from './errors.js';
 import type { HumanAuthProvider, HumanAuthProviderId } from './human-auth-provider.js';
@@ -22,14 +22,13 @@ export interface OpenCollectiveServiceStoreOptions {
   readonly bootstrapTtlMs?: number;
   readonly humanAuthProvider?: HumanAuthProvider;
   readonly humanAuthRedirectUri?: string;
-  /** Startup-only local bootstrap recovery. Never exposed through HTTP. */
+  /** Startup-only link persistence and validation. Never issues replacement credentials. */
   readonly bootstrapUrl?: string;
 }
 
 export interface OpenedCollectiveServiceStore {
   readonly store: CollectiveServiceStore;
   readonly bootstrapSecret?: string;
-  readonly bootstrapReissued?: boolean;
 }
 
 export class CollectiveServiceStore {
@@ -59,22 +58,17 @@ export class CollectiveServiceStore {
       exists = false;
     }
     if (exists) {
-      let bootstrapReissued = false;
       try {
         const persistence = await PersistentServiceState.load(options.dataDirectory, async (state) => {
-          if (!options.bootstrapUrl) return state;
-          const prepared = await prepareStartupBootstrap(state, {
+          if (!options.bootstrapUrl) return;
+          await validateStartupBootstrap(state, {
             dataDirectory: options.dataDirectory,
             publicUrl: options.bootstrapUrl,
             now: now(),
-            ttlMs: options.bootstrapTtlMs ?? 24 * 60 * 60 * 1_000,
           });
-          bootstrapReissued = prepared !== state;
-          return prepared;
         });
         return {
           store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
-          bootstrapReissued,
         };
       } catch (error) {
         if (error instanceof CollectiveServiceError) throw error;
@@ -110,8 +104,8 @@ export class CollectiveServiceStore {
       legacyEvents: {},
       clientEventIndex: {},
     };
-    // Link is durable before the digest commit, so a crash cannot orphan the
-    // sole plaintext secret. Mismatches are repaired on the next pristine start.
+    // Deliver the first link before committing its digest. Existing Service
+    // credentials are only validated on restart, never replaced or repaired.
     if (options.bootstrapUrl) await writeBootstrapLink(options.dataDirectory, options.bootstrapUrl, bootstrapSecret);
     const persistence = await PersistentServiceState.create(options.dataDirectory, state);
     return {

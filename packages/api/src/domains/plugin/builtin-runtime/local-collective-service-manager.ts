@@ -182,7 +182,7 @@ export class LocalCollectiveServiceManager {
     if (!raw || raw.pid !== this.#spawnPid || raw.launchId !== this.#launchId || raw.status !== 'failed')
       return undefined;
     if (raw.code === 'BOOTSTRAP_UNRECOVERABLE') {
-      return 'Local Collective Service bootstrap_unrecoverable: initialization link cannot be recovered from non-pristine state; preserve data and use owner recovery';
+      return 'Local Collective Service bootstrap_unrecoverable: initialization link is missing or invalid; this version does not support automatic recovery; data is preserved; see #1563';
     }
     return `Local Collective Service startup failed; see ${join(this.#dataDirectory, SERVICE_LOG_FILE)}`;
   }

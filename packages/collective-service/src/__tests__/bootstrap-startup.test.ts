@@ -8,20 +8,25 @@ import { CollectiveServiceStore } from '../store.js';
 const directories: string[] = [];
 const publicUrl = 'http://127.0.0.1:55231/';
 const now = Date.parse('2026-10-01T00:00:00Z');
-const faults = vi.hoisted(() => ({ failStateWrite: false }));
+const faults = vi.hoisted(() => ({ stateFailure: '', failLink: false, writes: [] as string[] }));
 vi.mock('@cat-cafe/shared/node-private-fs', async (load) => {
   const actual = await load<typeof import('@cat-cafe/shared/node-private-fs')>();
   return {
     ...actual,
     writeAtomicPrivate: async (path: string, contents: string) => {
-      if (faults.failStateWrite && path.endsWith('collective-service.json'))
-        throw new Error('fixture digest commit failure');
-      return actual.writeAtomicPrivate(path, contents);
+      faults.writes.push(path);
+      if (faults.failLink && path.endsWith('owner-bootstrap.url')) throw new Error('fixture link commit failure');
+      const stateFile = path.endsWith('collective-service.json');
+      if (stateFile && faults.stateFailure === 'before') throw new Error('fixture state commit failure');
+      await actual.writeAtomicPrivate(path, contents);
+      if (stateFile && faults.stateFailure === 'after') throw new Error('fixture post-rename failure');
     },
   };
 });
 afterEach(async () => {
-  faults.failStateWrite = false;
+  faults.stateFailure = '';
+  faults.failLink = false;
+  faults.writes.length = 0;
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 async function fixture() {
@@ -37,17 +42,17 @@ async function linkSecret(directory: string) {
   if (!secret) throw new Error('fixture link has no bootstrap');
   return secret;
 }
-function requiredSecret(secret: string | undefined): string {
-  if (!secret) throw new Error('fixture bootstrap missing');
-  return secret;
-}
-describe('offline bootstrap startup', () => {
-  it('writes the private initialization link on first open and preserves it on a normal restart', async () => {
+
+describe('bootstrap startup persistence and diagnosis without reissue', () => {
+  it('writes the first link before the digest and preserves both on a normal restart', async () => {
     const options = await fixture();
     const first = await CollectiveServiceStore.open(options);
-    if (!first.bootstrapSecret) throw new Error('fixture bootstrap missing');
     const secret = await linkSecret(options.dataDirectory);
     expect(secret).toBe(first.bootstrapSecret);
+    expect(faults.writes.map((path) => path.split(/[\\/]/).at(-1))).toEqual([
+      'owner-bootstrap.url',
+      'collective-service.json',
+    ]);
     const before = await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8');
     const reopened = await CollectiveServiceStore.open(options);
     expect(reopened.bootstrapSecret).toBeUndefined();
@@ -59,31 +64,35 @@ describe('offline bootstrap startup', () => {
     'malformed',
     'mismatched',
     'expired',
-  ])('recovers a pristine %s link without changing Service identity', async (failure) => {
+  ])('diagnoses an unconsumed %s link without changing any records or provider files', async (failure) => {
     const options = await fixture();
-    const first = await CollectiveServiceStore.open(options);
-    const original = JSON.parse(await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8'));
+    await CollectiveServiceStore.open(options);
+    const statePath = join(options.dataDirectory, 'collective-service.json');
+    const before = await readFile(statePath, 'utf8');
+    const providerPaths = ['github-app-setup.json', 'github-app-oauth.json'].map((name) =>
+      join(options.dataDirectory, name),
+    );
+    const providerHistory = '{"fixture":"existing provider history"}\n';
+    for (const path of providerPaths) await writeFile(path, providerHistory, { mode: 0o600 });
     const path = join(options.dataDirectory, 'owner-bootstrap.url');
-    if (failure === 'missing') await rm(path, { force: true });
+    if (failure === 'missing') await rm(path);
     if (failure === 'malformed') await writeFile(path, 'invalid\n');
     if (failure === 'mismatched') await writeFile(path, `${publicUrl}#bootstrap=wrong\n`);
-    const second = await CollectiveServiceStore.open({
-      ...options,
-      now: () => (failure === 'expired' ? now + 86_400_001 : now),
+    const linkBefore = failure === 'missing' ? undefined : await readFile(path, 'utf8');
+    faults.writes.length = 0;
+    await expect(
+      CollectiveServiceStore.open({ ...options, now: () => (failure === 'expired' ? now + 86_400_001 : now) }),
+    ).rejects.toMatchObject({
+      code: 'BOOTSTRAP_UNRECOVERABLE',
+      message: expect.stringMatching(/does not support automatic recovery; data is preserved; see #1563/),
     });
-    expect(second.store.serviceInstanceId).toBe(first.store.serviceInstanceId);
-    expect(second.bootstrapReissued).toBe(true);
-    const updated = JSON.parse(await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8'));
-    expect(updated.createdAt).toBe(original.createdAt);
-    expect(updated.bootstrap.tokenDigest).not.toBe(original.bootstrap.tokenDigest);
-    await expect(
-      second.store.consumeBootstrap({ secret: requiredSecret(first.bootstrapSecret), displayName: 'old' }),
-    ).rejects.toMatchObject({ code: 'INVALID_BOOTSTRAP' });
-    await expect(
-      second.store.consumeBootstrap({ secret: await linkSecret(options.dataDirectory), displayName: 'owner' }),
-    ).resolves.toBeTruthy();
+    expect(faults.writes).toEqual([]);
+    expect(await readFile(statePath, 'utf8')).toBe(before);
+    if (failure === 'missing') await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    else expect(await readFile(path, 'utf8')).toBe(linkBefore);
+    for (const path of providerPaths) expect(await readFile(path, 'utf8')).toBe(providerHistory);
   });
-  it('refuses a non-pristine orphan without rewriting either persisted state or link', async () => {
+  it('refuses an orphan with existing domain state through the same unchanged-state path', async () => {
     const options = await fixture();
     await CollectiveServiceStore.open(options);
     const statePath = join(options.dataDirectory, 'collective-service.json');
@@ -112,25 +121,36 @@ describe('offline bootstrap startup', () => {
     expect((await reopened.store.requireSession(owner.sessionToken)).human.displayName).toBe('owner');
     expect(await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8')).toBe(before);
   });
-  it('recovers when the link commit succeeds but the digest commit fails', async () => {
+  it('does not create state when the first link cannot be persisted', async () => {
     const options = await fixture();
-    const first = await CollectiveServiceStore.open(options);
-    await rm(join(options.dataDirectory, 'owner-bootstrap.url'));
-    const statePath = join(options.dataDirectory, 'collective-service.json');
-    const original = await readFile(statePath, 'utf8');
-    faults.failStateWrite = true;
-    await expect(CollectiveServiceStore.open(options)).rejects.toThrow('fixture digest commit failure');
-    expect(await readFile(statePath, 'utf8')).toBe(original);
-    const orphanedSecret = await linkSecret(options.dataDirectory);
-    faults.failStateWrite = false;
-    const recovered = await CollectiveServiceStore.open(options);
-    expect(recovered.store.serviceInstanceId).toBe(first.store.serviceInstanceId);
-    expect(recovered.bootstrapReissued).toBe(true);
-    await expect(
-      recovered.store.consumeBootstrap({ secret: orphanedSecret, displayName: 'orphan' }),
-    ).rejects.toMatchObject({ code: 'INVALID_BOOTSTRAP' });
-    await expect(
-      recovered.store.consumeBootstrap({ secret: await linkSecret(options.dataDirectory), displayName: 'owner' }),
-    ).resolves.toBeTruthy();
+    faults.failLink = true;
+    await expect(CollectiveServiceStore.open(options)).rejects.toThrow('fixture link commit failure');
+    await expect(readFile(join(options.dataDirectory, 'collective-service.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+  it('delivers the first link before a failing state commit without claiming success', async () => {
+    const options = await fixture();
+    faults.stateFailure = 'before';
+    await expect(CollectiveServiceStore.open(options)).rejects.toThrow('fixture state commit failure');
+    expect(await linkSecret(options.dataDirectory)).toBeTruthy();
+    await expect(readFile(join(options.dataDirectory, 'collective-service.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+  it('reopens after a post-rename state failure using the existing link without rotating credentials', async () => {
+    const options = await fixture();
+    faults.stateFailure = 'after';
+    await expect(CollectiveServiceStore.open(options)).rejects.toThrow('fixture post-rename failure');
+    const secret = await linkSecret(options.dataDirectory);
+    const before = await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8');
+    faults.stateFailure = '';
+    faults.writes.length = 0;
+    const reopened = await CollectiveServiceStore.open(options);
+    expect(reopened.bootstrapSecret).toBeUndefined();
+    expect(reopened.store.serviceInstanceId).toBe(JSON.parse(before).serviceInstanceId);
+    expect(await linkSecret(options.dataDirectory)).toBe(secret);
+    expect(await readFile(join(options.dataDirectory, 'collective-service.json'), 'utf8')).toBe(before);
+    expect(faults.writes).toEqual([]);
   });
 });
