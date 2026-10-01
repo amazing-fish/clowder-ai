@@ -90,7 +90,7 @@ export class FlatScanner implements RepoScanner {
       return null;
     }
 
-    const rel = relative(root, filePath);
+    const rel = relative(root, filePath).replace(/\\/g, '/');
     const stem = basename(filePath, '.md');
     const anchor = `${this.collectionId}:doc/${rel.replace(/\.md$/, '')}`;
     const title = extractTitle(content) ?? stem;
@@ -116,7 +116,7 @@ export class FlatScanner implements RepoScanner {
 
   private isExcluded(relPath: string): boolean {
     if (!this.exclude?.length) return false;
-    return this.exclude.some((pattern) => matchGlob(pattern, relPath));
+    return this.exclude.some((pattern) => matchGlob(pattern, relPath.replace(/\\/g, '/')));
   }
 }
 
@@ -125,7 +125,10 @@ function extractTitle(content: string): string | null {
 }
 
 function extractSummary(content: string): string | null {
-  const afterTitle = content.replace(/^---[\s\S]*?---\s*/, '').replace(/^#.*$/m, '');
+  const afterTitle = content
+    .replace(/\r\n/g, '\n')
+    .replace(/^---[\s\S]*?---\s*/, '')
+    .replace(/^#.*$/m, '');
   const paragraphs = afterTitle.split(/\n\n+/).filter((p) => {
     const t = p.trim();
     return t && !t.startsWith('#') && !t.startsWith('>') && !t.startsWith('|') && !t.startsWith('```');

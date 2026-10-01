@@ -163,6 +163,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       root?: string;
       sensitivity?: string;
       scannerLevel?: number | 'auto';
+      fieldMapping?: CollectionManifest['fieldMapping'];
       exclude?: string[];
     };
 
@@ -210,6 +211,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       sensitivity,
       ...(ownerUserId ? { ownerUserId } : {}),
       scannerLevel: (body.scannerLevel ?? 'auto') as CollectionManifest['scannerLevel'],
+      ...(body.fieldMapping ? { fieldMapping: body.fieldMapping } : {}),
       status: 'registered',
       indexPolicy: { autoRebuild: false },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },

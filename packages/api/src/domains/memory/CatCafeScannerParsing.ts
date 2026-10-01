@@ -1,20 +1,9 @@
 import { basename, relative } from 'node:path';
 import { inferKindFromPath } from '@cat-cafe/shared/scanner-discovery-pure';
-import type { EvidenceKind, EvidenceStatus, ScannedEvidence } from './interfaces.js';
+import { EVIDENCE_STATUSES, type EvidenceKind, type EvidenceStatus, type ScannedEvidence } from './interfaces.js';
 import { isMarkdownSeparator, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 
-const VALID_EVIDENCE_STATUSES = new Set<EvidenceStatus>([
-  'active',
-  'done',
-  'archived',
-  'review',
-  'invalidated',
-  'superseded',
-  'drifted',
-  'stale',
-  'historical',
-  'retired',
-]);
+const VALID_EVIDENCE_STATUSES = new Set<EvidenceStatus>(EVIDENCE_STATUSES);
 const EMPTY_FRONTMATTER_REFS = new Set(['null', '~', '[]']);
 
 const DIRECT_FRONTMATTER_KIND_MAP: Readonly<Record<string, EvidenceKind>> = {
@@ -153,7 +142,7 @@ function decodeNumericXmlEntity(body: string, fallback: string): string {
 }
 
 export function extractFrontmatter(content: string): Record<string, unknown> | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  const match = content.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
   if (!match?.[1]) return null;
 
   const yaml = match[1];
@@ -322,7 +311,7 @@ function normalizeFrontmatterRef(value: string): string | null {
   return ref;
 }
 
-function normalizeFrontmatterScalar(value: string): string {
+export function normalizeFrontmatterScalar(value: string): string {
   return stripMatchingYamlScalarQuotes(stripYamlInlineComment(value).trim()).trim();
 }
 
@@ -414,7 +403,7 @@ export function extractTitle(content: string): string | null {
 }
 
 export function extractSummary(content: string): string | null {
-  const afterTitle = stripYamlFrontmatter(content).replace(/^#.*$/m, '');
+  const afterTitle = stripYamlFrontmatter(content.replace(/\r\n/g, '\n')).replace(/^#.*$/m, '');
   const paragraphs = afterTitle.split(/\n\n+/).filter((p) => {
     const t = p.trim();
     if (!t) return false;

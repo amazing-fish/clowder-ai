@@ -47,17 +47,19 @@ export const EVIDENCE_KINDS = [
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
-export type EvidenceStatus =
-  | 'active'
-  | 'done'
-  | 'archived'
-  | 'review'
-  | 'invalidated'
-  | 'superseded'
-  | 'drifted'
-  | 'stale'
-  | 'historical'
-  | 'retired';
+export const EVIDENCE_STATUSES = [
+  'active',
+  'done',
+  'archived',
+  'review',
+  'invalidated',
+  'superseded',
+  'drifted',
+  'stale',
+  'historical',
+  'retired',
+] as const;
+export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 
 // ── F152 Phase A: Provenance + Scanner types ────────────────────────
 
@@ -77,6 +79,13 @@ export interface ScannedEvidence {
 
 export interface RepoScanner {
   discover(projectRoot: string, options?: Record<string, unknown>): ScannedEvidence[];
+  getWarnings?(): CollectionScanWarning[];
+}
+
+export interface CollectionScanWarning {
+  code: 'unmapped_status';
+  path: string;
+  value: string;
 }
 
 export const IRepoScannerSymbol = Symbol.for('IRepoScanner');
