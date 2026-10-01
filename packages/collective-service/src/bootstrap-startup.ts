@@ -8,7 +8,7 @@ export const BOOTSTRAP_LINK_FILE = 'owner-bootstrap.url';
 
 export async function validateStartupBootstrap(
   state: ServiceState,
-  options: { dataDirectory: string; publicUrl: string; now: number },
+  options: { dataDirectory: string; publicUrl: string },
 ): Promise<void> {
   if (state.bootstrap.consumedAt !== undefined) return;
   const path = join(options.dataDirectory, BOOTSTRAP_LINK_FILE);
@@ -19,7 +19,7 @@ export async function validateStartupBootstrap(
     // Permission and IO failures are never treated as a lost secret.
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
   }
-  if (link && validLink(link, state, options.publicUrl, options.now)) return;
+  if (link && matchesBootstrapLink(link, state, options.publicUrl)) return;
   throw new CollectiveServiceError(
     'BOOTSTRAP_UNRECOVERABLE',
     'Collective Service bootstrap_unrecoverable: initialization link is missing or invalid; this version does not support automatic recovery; data is preserved; see #1563',
@@ -33,8 +33,9 @@ export async function writeBootstrapLink(directory: string, publicUrl: string, s
   await writeAtomicPrivate(join(directory, BOOTSTRAP_LINK_FILE), `${url.href}\n`);
 }
 
-function validLink(link: string, state: ServiceState, publicUrl: string, now: number): boolean {
-  if (Date.parse(state.bootstrap.expiresAt) < now) return false;
+function matchesBootstrapLink(link: string, state: ServiceState, publicUrl: string): boolean {
+  // Startup verifies delivery of the stored credential. Expiry remains enforced
+  // when consuming bootstrap or authorizing provider setup, as before.
   try {
     const url = new URL(link.trim());
     const expected = new URL(publicUrl);

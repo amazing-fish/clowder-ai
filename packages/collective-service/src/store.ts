@@ -64,7 +64,6 @@ export class CollectiveServiceStore {
           await validateStartupBootstrap(state, {
             dataDirectory: options.dataDirectory,
             publicUrl: options.bootstrapUrl,
-            now: now(),
           });
         });
         return {

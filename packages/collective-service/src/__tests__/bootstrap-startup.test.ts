@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertWindowsPrivatePath } from '../../../collective-connector/src/windows-private-path.js';
+import { startCollectiveServer } from '../http-server.js';
 import { CollectiveServiceStore } from '../store.js';
 
 const directories: string[] = [];
@@ -63,7 +64,6 @@ describe('bootstrap startup persistence and diagnosis without reissue', () => {
     'missing',
     'malformed',
     'mismatched',
-    'expired',
   ])('diagnoses an unconsumed %s link without changing any records or provider files', async (failure) => {
     const options = await fixture();
     await CollectiveServiceStore.open(options);
@@ -80,9 +80,7 @@ describe('bootstrap startup persistence and diagnosis without reissue', () => {
     if (failure === 'mismatched') await writeFile(path, `${publicUrl}#bootstrap=wrong\n`);
     const linkBefore = failure === 'missing' ? undefined : await readFile(path, 'utf8');
     faults.writes.length = 0;
-    await expect(
-      CollectiveServiceStore.open({ ...options, now: () => (failure === 'expired' ? now + 86_400_001 : now) }),
-    ).rejects.toMatchObject({
+    await expect(CollectiveServiceStore.open(options)).rejects.toMatchObject({
       code: 'BOOTSTRAP_UNRECOVERABLE',
       message: expect.stringMatching(/does not support automatic recovery; data is preserved; see #1563/),
     });
@@ -91,6 +89,37 @@ describe('bootstrap startup persistence and diagnosis without reissue', () => {
     if (failure === 'missing') await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
     else expect(await readFile(path, 'utf8')).toBe(linkBefore);
     for (const path of providerPaths) expect(await readFile(path, 'utf8')).toBe(providerHistory);
+  });
+  it('listens after an unchanged matching link expires while rejecting its use at existing auth boundaries', async () => {
+    const options = await fixture();
+    await CollectiveServiceStore.open(options);
+    const statePath = join(options.dataDirectory, 'collective-service.json');
+    const linkPath = join(options.dataDirectory, 'owner-bootstrap.url');
+    const stateBefore = await readFile(statePath, 'utf8');
+    const linkBefore = await readFile(linkPath, 'utf8');
+    const secret = await linkSecret(options.dataDirectory);
+    faults.writes.length = 0;
+    const reopened = await CollectiveServiceStore.open({ ...options, now: () => now + 86_400_001 });
+    const server = await startCollectiveServer({
+      store: reopened.store,
+      host: '127.0.0.1',
+      port: 0,
+      allowedHostOrigins: [],
+    });
+    try {
+      expect((await fetch(`${server.url}/api/health`)).status).toBe(200);
+      await expect(reopened.store.consumeBootstrap({ secret, displayName: 'owner' })).rejects.toMatchObject({
+        code: 'BOOTSTRAP_EXPIRED',
+      });
+      await expect(
+        Promise.resolve().then(() => reopened.store.authorizeProviderSetup({ bootstrapSecret: secret })),
+      ).rejects.toMatchObject({ code: 'BOOTSTRAP_EXPIRED' });
+      expect(faults.writes).toEqual([]);
+      expect(await readFile(statePath, 'utf8')).toBe(stateBefore);
+      expect(await readFile(linkPath, 'utf8')).toBe(linkBefore);
+    } finally {
+      await server.close();
+    }
   });
   it('refuses an orphan with existing domain state through the same unchanged-state path', async () => {
     const options = await fixture();
