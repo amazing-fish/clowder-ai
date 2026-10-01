@@ -44,6 +44,14 @@ Connector verification covers 22 distinct passing cases: 19 from the broad run, 
 
 Fallback coordinate check: ownership moved to the single state publication point rather than adding locks, PID/TTL takeover or retry chains. The link validator retains URL parsing refusal and narrow ENOENT handling; cleanup accepts only a concurrently removed temporary file. The shared publisher treats only EEXIST as another winner and propagates all other publication/flush errors. No credential-generation fallback or cached privacy decision exists. This first-creation correction does not serialize two already-running listeners' later transactions.
 
+## CI directory blocker correction
+
+At `de4554275`, GitHub run `36819273546` failed both Directory Size Guard and Lint at the same `check-dir-size.sh` invocation: the session-directory exception expired on 2026-09-30. Biome had already passed; this was not a new Service lint error.
+
+The correction moves the nine F296 context presentation, continuity/epoch, ledger and telemetry modules into `session/context/`, updates their source, test and UAT-script consumers, and removes only the now-unnecessary session exception. The session root has 23 counted TypeScript files; its context child has nine. ADR-010 thresholds, all other exceptions, runtime logic and persistence formats are retained. No old-path forwarding modules are introduced. The remaining root holds lifecycle, transcript and invocation-evidence responsibilities; their further reorganization is unnecessary for this bounded CI correction and the root remains below the hard threshold.
+
+The original checker was reproduced RED before the split and exits zero afterward, retaining existing warning-level output. Source/test/script AST comparison after resolving module paths proves unchanged non-path syntax. Validation compiles API source and removes the nine obsolete generated module copies before regression tests, so stale dist files cannot hide missed imports. The Windows F296 broad run passed 275 cases and skipped one; its unchanged Unix shell-hook test could not complete on this host (WSL cannot consume the Windows path; Git Bash has a different `/tmp` namespace from native Node). No shell-hook assertion or platform gate was weakened to relabel that invocation green. Fresh remote Linux CI and upstream exact-head review remain separate required evidence.
+
 ## Measured Windows cost
 
 The unchanged shared writer was measured in an isolated fixture: five atomic writes took 985, 963, 976, 1002 and 964 ms; three authenticated `POST /api/events/human` calls took 1008, 996 and 980 ms. A fake auth provider made no external requests. This small local sample confirms roughly one second per mutation here, not a production throughput claim.
