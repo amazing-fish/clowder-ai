@@ -146,12 +146,15 @@ export class LocalCollectiveServiceManager {
 
   async #waitForLaunch(): Promise<LocalCollectiveServiceLaunch> {
     for (let attempt = 0; attempt < START_ATTEMPTS; attempt += 1) {
-      const failure = await this.#readStartupFailure();
-      if (failure) throw new Error(failure);
       const status = await this.#inspect();
       const launch = await this.#launchForStatus(status);
+      // A fenced record proves only our child failed. A competing child may
+      // already serve this exact durable identity. Still read diagnostics so
+      // private-file IO failures remain strict, but prefer a verified launch.
+      const failure = await this.#readStartupFailure();
       if (launch) return launch;
       if (status.state === 'error') throw new Error(status.error ?? 'Local Collective Service startup failed');
+      if (failure) throw new Error(failure);
       await this.#wait(START_INTERVAL_MS);
     }
     throw new Error(
