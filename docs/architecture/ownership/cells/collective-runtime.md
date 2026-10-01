@@ -55,8 +55,11 @@ before invitations, pairing or ordinary messaging. Provider subjects remain adap
 identity is the Service-generated `humanId`.
 
 Private persistence uses the node-only shared filesystem helper for platform durability and native Windows
-ACL validation. Service startup delivers the first bootstrap link before its digest commit and validates
-existing links on restart. Invalid unconsumed links fail without state changes or credential reissue.
+ACL validation. Service startup stages the original bootstrap link before exclusive first-state publication,
+then exclusively delivers the credential matching that committed digest. Restart may complete interrupted
+first delivery from its exact private pending file; existing invalid links and old orphans fail unchanged.
+Competing creation cannot replace the winner's identity, link or consumed owner. Credential reissue and
+serialization of later transactions across multiple listeners remain separate boundaries.
 Host startup diagnostics identify the exact child by PID and a per-launch ID without carrying secrets.
 
 The official Collective Connector is the Clowder AI endpoint adapter. It owns Host-side endpoint credential

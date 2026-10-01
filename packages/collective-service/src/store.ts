@@ -1,7 +1,7 @@
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COLLECTIVE_CLIENT_BUILD_ID } from '@cat-cafe/collective-client';
-import { validateStartupBootstrap, writeBootstrapLink } from './bootstrap-startup.js';
+import { discardPendingBootstrapLink, stageBootstrapLink, validateStartupBootstrap } from './bootstrap-startup.js';
 import { CollectiveConnectionEventStore, type PairingExchangeInput } from './connection-event-store.js';
 import { CollectiveServiceError } from './errors.js';
 import type { HumanAuthProvider, HumanAuthProviderId } from './human-auth-provider.js';
@@ -103,10 +103,19 @@ export class CollectiveServiceStore {
       legacyEvents: {},
       clientEventIndex: {},
     };
-    // Deliver the first link before committing its digest. Existing Service
-    // credentials are only validated on restart, never replaced or repaired.
-    if (options.bootstrapUrl) await writeBootstrapLink(options.dataDirectory, options.bootstrapUrl, bootstrapSecret);
+    // Stage the original credential before the sole exclusive ownership commit.
+    // Failures may retain this private pending file for same-credential delivery.
+    const pendingLink = options.bootstrapUrl
+      ? await stageBootstrapLink(options.dataDirectory, options.bootstrapUrl, bootstrapSecret)
+      : undefined;
     const persistence = await PersistentServiceState.create(options.dataDirectory, state);
+    if (!persistence) {
+      await discardPendingBootstrapLink(pendingLink);
+      return CollectiveServiceStore.open(options);
+    }
+    if (options.bootstrapUrl) {
+      await validateStartupBootstrap(state, { dataDirectory: options.dataDirectory, publicUrl: options.bootstrapUrl });
+    }
     return {
       store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
       bootstrapSecret,

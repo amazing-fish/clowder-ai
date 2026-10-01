@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { assertWindowsPrivatePath } from './windows-private-path.js';
 
@@ -33,6 +33,15 @@ export async function readPrivateFile(path: string): Promise<string> {
 }
 
 export async function writeAtomicPrivate(path: string, contents: string): Promise<void> {
+  await writePrivate(path, contents, false);
+}
+
+/** Publish a flushed, complete file once. Existing destinations are never replaced. */
+export async function writeExclusivePrivate(path: string, contents: string): Promise<boolean> {
+  return writePrivate(path, contents, true);
+}
+
+async function writePrivate(path: string, contents: string, exclusive: boolean): Promise<boolean> {
   const directory = dirname(path);
   await ensurePrivateDirectory(directory);
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -44,16 +53,28 @@ export async function writeAtomicPrivate(path: string, contents: string): Promis
     } finally {
       await handle.close();
     }
-    await rename(temporaryPath, path);
+    if (exclusive) {
+      try {
+        await link(temporaryPath, path);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'EEXIST') return false;
+        // Unsupported hard links and arbitrary IO errors must never fall back
+        // to replacement: that would transfer ownership to a losing writer.
+        throw error;
+      }
+    } else {
+      await rename(temporaryPath, path);
+    }
     // Windows cannot fsync directory handles. Keep file fsync and same-directory
     // rename there; Unix still flushes the rename to stable storage.
-    if (process.platform === 'win32') return;
+    if (process.platform === 'win32') return true;
     const directoryHandle = await open(directory, 'r');
     try {
       await directoryHandle.sync();
     } finally {
       await directoryHandle.close();
     }
+    return true;
   } finally {
     await unlink(temporaryPath).catch((error: unknown) => {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;

@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
-import { ensurePrivateDirectory, readPrivateFile, writeAtomicPrivate } from '@cat-cafe/shared/node-private-fs';
+import {
+  ensurePrivateDirectory,
+  readPrivateFile,
+  writeAtomicPrivate,
+  writeExclusivePrivate,
+} from '@cat-cafe/shared/node-private-fs';
 
 import { type MutableServiceState, migrateServiceState, parseServiceState, type ServiceState } from './state.js';
 
@@ -34,11 +39,10 @@ export class PersistentServiceState {
     this.#state = state;
   }
 
-  static async create(dataDirectory: string, state: ServiceState): Promise<PersistentServiceState> {
+  static async create(dataDirectory: string, state: ServiceState): Promise<PersistentServiceState | undefined> {
     const filePath = join(dataDirectory, SERVICE_STATE_FILE);
-    const persistence = new PersistentServiceState(filePath, state);
-    await writeAtomic(filePath, state);
-    return persistence;
+    const created = await writeExclusivePrivate(filePath, `${JSON.stringify(state, null, 2)}\n`);
+    return created ? new PersistentServiceState(filePath, state) : undefined;
   }
 
   static async load(
