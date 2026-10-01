@@ -3,10 +3,11 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, before, beforeEach, describe, it } from 'node:test';
+import Fastify from 'fastify';
 
 function expectedCollectionId(projectPath) {
   let name = basename(projectPath)
@@ -199,4 +200,130 @@ describe('ensureProjectCollection', () => {
     const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
     assert.ok(result2.docsIndexed >= 2, `second run should report ≥2 total docs (not 0), got ${result2.docsIndexed}`);
   });
+});
+
+describe('project bootstrap owner binding', () => {
+  let ensureProjectCollection, LibraryCatalog, KnowledgeResolver, evidenceRoutes;
+  let project, dataDir, catalog, stores, app;
+
+  before(async () => {
+    ({ ensureProjectCollection } = await import('../../dist/domains/memory/bootstrap-collection-bridge.js'));
+    ({ LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js'));
+    ({ KnowledgeResolver } = await import('../../dist/domains/memory/KnowledgeResolver.js'));
+    ({ evidenceRoutes } = await import('../../dist/routes/evidence.js'));
+  });
+
+  beforeEach(() => {
+    project = mkdtempSync(join(tmpdir(), 'project-owner-vault-'));
+    dataDir = mkdtempSync(join(tmpdir(), 'project-owner-data-'));
+    writeFileSync(join(project, 'guide.md'), '# Calibration\n\nCalibration requires an illuminated label.\n');
+    catalog = new LibraryCatalog();
+    stores = new Map();
+  });
+
+  afterEach(async () => {
+    await app?.close();
+    app = undefined;
+    for (const store of stores.values()) store.close();
+    rmSync(project, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('new registration is searchable by its owner in the same runtime and rejects other owners', async () => {
+    await ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-a');
+    const manifest = catalog.list()[0];
+
+    const store = stores.get(manifest.id);
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      evidenceStore: store,
+      catalog,
+      knowledgeResolver: new KnowledgeResolver({ projectStore: store, catalog, stores }),
+    });
+    const url = `/api/evidence/search?q=calibration&scope=docs&mode=lexical&dimension=collection&collections=${manifest.id}`;
+    const own = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'owner-a' } });
+    assert.equal(own.statusCode, 200);
+    assert.equal(own.json().results.length, 1);
+    assert.equal(manifest.ownerUserId, 'owner-a');
+    const persisted = JSON.parse(readFileSync(join(dataDir, 'library', 'collections.json'), 'utf8'));
+    assert.equal(persisted[0].ownerUserId, 'owner-a');
+    const other = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'owner-b' } });
+    assert.equal(other.statusCode, 200);
+    assert.deepEqual(other.json().results, []);
+  });
+
+  it('missing or blank identity fails before creating persistent or in-memory state', async () => {
+    for (const identity of [undefined, '', '   ']) {
+      await assert.rejects(
+        ensureProjectCollection(project, catalog, stores, dataDir, undefined, identity),
+        /owner.*required/i,
+      );
+      assert.equal(catalog.list().length, 0);
+      assert.equal(stores.size, 0);
+      assert.equal(existsSync(join(dataDir, 'library')), false);
+    }
+  });
+
+  it('preserves existing private/restricted owners and rejects indexing by another owner', async () => {
+    await ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-a');
+    const manifest = catalog.list()[0];
+    for (const sensitivity of ['private', 'restricted']) {
+      manifest.sensitivity = sensitivity;
+      await ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-a');
+      await assert.rejects(
+        ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-b'),
+        /different owner/i,
+      );
+      assert.equal(manifest.ownerUserId, 'owner-a');
+      const persisted = JSON.parse(readFileSync(join(dataDir, 'library', 'collections.json'), 'utf8'));
+      assert.equal(persisted[0].ownerUserId, 'owner-a');
+    }
+  });
+
+  for (const sensitivity of ['private', 'restricted']) {
+    it(`startup preserves historical unbound ${sensitivity} ownership before bootstrap`, async () => {
+      await ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-a');
+      const manifest = catalog.list()[0];
+      manifest.sensitivity = sensitivity;
+      delete manifest.ownerUserId;
+      writeFileSync(join(dataDir, 'library', 'collections.json'), JSON.stringify([manifest]));
+      for (const store of stores.values()) store.close();
+      stores = new Map();
+      catalog = new LibraryCatalog();
+      const { loadExternalCollections } = await import('../../dist/domains/memory/external-collections.js');
+      const { registerPrivateAndExternalCollections } = await import(
+        '../../dist/domains/memory/private-collection-bindings.js'
+      );
+      await registerPrivateAndExternalCollections({
+        catalog,
+        stores,
+        dataDir,
+        externalManifests: loadExternalCollections(dataDir),
+        privateUserId: 'owner-b',
+        now: new Date().toISOString(),
+      });
+      assert.equal(catalog.get(manifest.id).ownerUserId, undefined);
+      await assert.rejects(
+        ensureProjectCollection(project, catalog, stores, dataDir, undefined, 'owner-b'),
+        /no owner/i,
+      );
+      const store = stores.get(manifest.id);
+      app = Fastify();
+      await app.register(evidenceRoutes, {
+        evidenceStore: store,
+        catalog,
+        knowledgeResolver: new KnowledgeResolver({ projectStore: store, catalog, stores }),
+      });
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/evidence/search?q=calibration&scope=docs&dimension=collection&collections=${manifest.id}`,
+        headers: { 'x-cat-cafe-user': 'owner-b' },
+      });
+      assert.deepEqual(response.json().results, []);
+      assert.equal(
+        JSON.parse(readFileSync(join(dataDir, 'library', 'collections.json'), 'utf8'))[0].ownerUserId,
+        undefined,
+      );
+    });
+  }
 });

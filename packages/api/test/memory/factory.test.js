@@ -157,12 +157,13 @@ describe('createMemoryServices', () => {
     }
   });
 
-  it('binds legacy private external collections to the configured runtime owner', async () => {
+  it('preserves unbound legacy private external ownership at startup', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
     const { saveExternalCollection } = await import('../../dist/domains/memory/external-collections.js');
     const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-external-data-'));
     const root = mkdtempSync(join(tmpdir(), 'f263-private-external-root-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-external-docs-'));
+    let services;
     try {
       saveExternalCollection(dataDir, {
         id: 'domain:legacy-private',
@@ -178,22 +179,22 @@ describe('createMemoryServices', () => {
         updatedAt: '2026-05-22T00:00:00.000Z',
       });
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
-        sqlitePath: join(dataDir, 'project.sqlite'),
-        globalDbPath: join(dataDir, 'global.sqlite'),
+        sqlitePath: ':memory:',
+        globalDbPath: ':memory:',
         dataDir,
         docsRoot,
         privateUserId: 'owner-1',
       });
 
-      assert.equal(services.catalog.get('domain:legacy-private').ownerUserId, 'owner-1');
+      assert.equal(services.catalog.get('domain:legacy-private').ownerUserId, undefined);
       assert.equal(services.catalog.getRoutable('collection', ['domain:legacy-private']).length, 0);
-      assert.equal(
-        services.catalog.getRoutable('collection', ['domain:legacy-private'], ['domain:legacy-private']).length,
-        1,
-      );
     } finally {
+      if (services) {
+        for (const store of new Set([services.store, services.globalStore, ...services.collectionStores.values()]))
+          store?.close();
+      }
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
