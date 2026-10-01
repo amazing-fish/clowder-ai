@@ -174,9 +174,10 @@ export class LocalCollectiveServiceManager {
       raw = JSON.parse(contents) as Record<string, unknown>;
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
-      // Corrupt data cannot identify a child or carry a trusted failure code.
+      // Corrupt data cannot identify a child. Ignore residual diagnostics so a
+      // healthy launch can proceed; a failed child atomically writes its own record.
       // Do not expose parser excerpts, which may contain private file contents.
-      return `Local Collective Service startup diagnostic is unreadable; see ${join(this.#dataDirectory, SERVICE_LOG_FILE)}`;
+      return undefined;
     }
     if (!raw || raw.pid !== this.#spawnPid || raw.launchId !== this.#launchId || raw.status !== 'failed')
       return undefined;
