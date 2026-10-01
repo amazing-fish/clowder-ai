@@ -122,7 +122,10 @@ export function validateManifestInput(input: {
         Array.isArray(fields.status) ||
         Object.entries(fields.status).some(
           ([source, target]) =>
-            !isField(source) ||
+            !source ||
+            source.length > 80 ||
+            source.trim() !== source ||
+            /[\x00-\x1f\x7f]/.test(source) ||
             typeof target !== 'string' ||
             !(EVIDENCE_STATUSES as readonly string[]).includes(target),
         )

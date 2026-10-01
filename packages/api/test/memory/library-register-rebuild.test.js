@@ -44,7 +44,11 @@ describe('library register + rebuild endpoints', () => {
         'Plain body.',
       ].join('\r\n'),
     );
-    const mapping = { summary: 'assertion_text', keywords: ['wake_condition', 'labels'] };
+    const mapping = {
+      summary: 'assertion_text',
+      keywords: ['wake_condition', 'labels'],
+      status: { 'in-progress': 'review', superseded: 'superseded' },
+    };
     const response = await app.inject({
       method: 'POST',
       url: '/api/library/register',
@@ -109,7 +113,10 @@ describe('library register + rebuild endpoints', () => {
     mkdirSync(root);
     const path = join(root, 'note.md');
     const write = (status) =>
-      writeFileSync(path, `---\nstatus: ${status}\nassertion_text: calibration reference\n---\n# Calibration\n\nBody.`);
+      writeFileSync(
+        path,
+        `---\nstatus: ${status}\nassertion_text: calibration reference\nsupersedes: older-note\n---\n# Calibration\n\nBody.`,
+      );
     write('active');
     const response = await app.inject({
       method: 'POST',
@@ -134,9 +141,15 @@ describe('library register + rebuild endpoints', () => {
     const builder = new CollectionIndexBuilder(store, manifest, scanner);
     await builder.rebuild();
     assert.equal((await store.search('calibration'))[0].status, 'active');
+    assert.equal(store.getDb().prepare("SELECT COUNT(*) AS n FROM edges WHERE provenance = 'frontmatter'").get().n, 1);
     write('dormant');
     await builder.incrementalUpdate([path]);
     assert.deepEqual(await store.search('calibration'), []);
+    assert.equal(
+      store.getDb().prepare("SELECT COUNT(*) AS n FROM edges WHERE provenance = 'frontmatter'").get().n,
+      0,
+      'excluded documents cannot remain as generated graph nodes',
+    );
     assert.deepEqual(scanner.getWarnings(), [{ code: 'unmapped_status', path: 'note.md', value: 'dormant' }]);
     write('active');
     await builder.rebuild();

@@ -119,7 +119,10 @@ export class CollectionIndexBuilder {
             .getDb()
             .prepare("SELECT anchor FROM evidence_docs WHERE REPLACE(source_path, char(92), '/') = ? AND anchor LIKE ?")
             .all(path, `${this.manifest.id}:%`) as Array<{ anchor: string }>;
-          for (const row of rows) await this.store.deleteByAnchor(row.anchor);
+          for (const row of rows) {
+            await this.store.deleteByAnchor(row.anchor);
+            await this.deleteFrontmatterSupersedesEdges(row.anchor);
+          }
         }
         continue;
       }
