@@ -169,7 +169,15 @@ export class LocalCollectiveServiceManager {
       if (isMissingFile(error)) return undefined;
       throw error;
     }
-    const raw = JSON.parse(contents) as Record<string, unknown>;
+    let raw: Record<string, unknown>;
+    try {
+      raw = JSON.parse(contents) as Record<string, unknown>;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      // Corrupt data cannot identify a child or carry a trusted failure code.
+      // Do not expose parser excerpts, which may contain private file contents.
+      return `Local Collective Service startup diagnostic is unreadable; see ${join(this.#dataDirectory, SERVICE_LOG_FILE)}`;
+    }
     if (!raw || raw.pid !== this.#spawnPid || raw.launchId !== this.#launchId || raw.status !== 'failed')
       return undefined;
     if (raw.code === 'BOOTSTRAP_UNRECOVERABLE') {

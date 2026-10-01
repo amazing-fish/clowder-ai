@@ -7,6 +7,46 @@ import { test } from 'node:test';
 import { ensurePrivateDirectory } from '@cat-cafe/shared/node-private-fs';
 import { LocalCollectiveServiceManager } from '../src/domains/plugin/builtin-runtime/local-collective-service-manager.js';
 
+test('reports damaged startup diagnostics without leaking JSON contents or changing state', async () => {
+  const dataDirectory = join(tmpdir(), `collective-startup-damaged-${randomUUID()}`);
+  await ensurePrivateDirectory(dataDirectory);
+  const state = '{"serviceInstanceId":"svc_preserved"}\n';
+  await writeFile(join(dataDirectory, 'collective-service.json'), state, { mode: 0o600 });
+  let waits = 0;
+  const manager = new LocalCollectiveServiceManager({
+    dataDirectory,
+    env: {},
+    frontendBaseUrl: 'http://localhost:5102',
+    serviceUrl: 'http://127.0.0.1:55231',
+    cliPath: 'fixture-cli',
+    fetchImpl: async () => {
+      throw new Error('offline fixture');
+    },
+    spawnProcess: async () => {
+      await writeFile(join(dataDirectory, 'collective-service-startup.json'), '{"secret":"fixture-secret', {
+        mode: 0o600,
+      });
+      return { pid: 90003 };
+    },
+    wait: async () => {
+      waits += 1;
+    },
+  });
+  try {
+    await assert.rejects(manager.provision(), (error: Error) => {
+      assert.equal(error instanceof SyntaxError, false);
+      assert.match(error.message, /startup diagnostic is unreadable; see .*collective-service\.log/);
+      assert.equal(error.message.includes('fixture-secret'), false);
+      assert.equal(error.message.includes('bootstrap_unrecoverable'), false);
+      return true;
+    });
+    assert.equal(waits, 0);
+    assert.equal(await readFile(join(dataDirectory, 'collective-service.json'), 'utf8'), state);
+  } finally {
+    await rm(dataDirectory, { recursive: true, force: true });
+  }
+});
+
 test('managed startup returns the exact child failure immediately and ignores stale pid diagnostics', async () => {
   const dataDirectory = join(tmpdir(), `collective-startup-failure-${randomUUID()}`);
   await ensurePrivateDirectory(dataDirectory);
