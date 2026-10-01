@@ -15,6 +15,9 @@ canonical_features: [F290]
 code_anchors:
   - packages/shared/src/types/collective.ts
   - packages/collective-service/src/store.ts
+  - packages/collective-service/src/bootstrap-startup.ts
+  - packages/shared/src/node-private-fs.ts
+  - packages/shared/src/windows-private-path.ts
   - packages/collective-service/src/identity-store.ts
   - packages/collective-service/src/github-human-auth-provider.ts
   - packages/collective-service/src/http-server.ts
@@ -50,6 +53,11 @@ Bootstrap creates an identity-limited initial owner session that may establish o
 steward, breaking the self-host provider-configuration cycle. A provider-authenticated Human binding is required
 before invitations, pairing or ordinary messaging. Provider subjects remain adapter keys; the stable domain
 identity is the Service-generated `humanId`.
+
+Private persistence uses the node-only shared filesystem helper for platform durability and native Windows
+ACL validation. Service startup owns local recovery of an unconsumed bootstrap only when every record
+collection is empty; it preserves Service identity and never rotates an initialized owner's credentials.
+Host startup diagnostics identify the exact child by PID and a per-launch ID without carrying secrets.
 
 The official Collective Connector is the Clowder AI endpoint adapter. It owns Host-side endpoint credential
 custody, durable outbox/inbox, reconnect, replay, ACK, Host-route disposition and revoke. It may turn a Clowder AI

@@ -1,6 +1,8 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { ensurePrivateDirectory, readPrivateFile } from '@cat-cafe/shared/node-private-fs';
 
 import {
   configuredLocalCollectiveServiceUrl,
@@ -60,6 +62,8 @@ export class LocalCollectiveServiceManager {
   readonly #spawnProcess: (spec: LocalCollectiveServiceSpawnSpec) => Promise<{ readonly pid: number }>;
   readonly #wait: (milliseconds: number) => Promise<void>;
   #startPromise: Promise<LocalCollectiveServiceLaunch> | undefined;
+  #spawnPid: number | undefined;
+  #launchId: string | undefined;
 
   constructor(options: LocalCollectiveServiceManagerOptions) {
     this.#env = options.env;
@@ -128,19 +132,22 @@ export class LocalCollectiveServiceManager {
   }
 
   async #startAndWait(): Promise<LocalCollectiveServiceLaunch> {
-    await mkdir(this.#dataDirectory, { recursive: true, mode: 0o700 });
-    await chmod(this.#dataDirectory, 0o700);
-    await this.#spawnProcess({
+    await ensurePrivateDirectory(this.#dataDirectory);
+    this.#launchId = randomUUID();
+    const child = await this.#spawnProcess({
       command: process.execPath,
       args: [this.#cliPath],
       env: this.#serviceEnvironment(),
       logPath: join(this.#dataDirectory, SERVICE_LOG_FILE),
     });
+    this.#spawnPid = child.pid;
     return this.#waitForLaunch();
   }
 
   async #waitForLaunch(): Promise<LocalCollectiveServiceLaunch> {
     for (let attempt = 0; attempt < START_ATTEMPTS; attempt += 1) {
+      const failure = await this.#readStartupFailure();
+      if (failure) throw new Error(failure);
       const status = await this.#inspect();
       const launch = await this.#launchForStatus(status);
       if (launch) return launch;
@@ -150,6 +157,25 @@ export class LocalCollectiveServiceManager {
     throw new Error(
       `Local Collective Service did not become ready; see ${join(this.#dataDirectory, SERVICE_LOG_FILE)}`,
     );
+  }
+
+  async #readStartupFailure(): Promise<string | undefined> {
+    if (this.#spawnPid === undefined) return undefined;
+    const path = join(this.#dataDirectory, 'collective-service-startup.json');
+    let contents: string;
+    try {
+      contents = await readPrivateFile(path);
+    } catch (error) {
+      if (isMissingFile(error)) return undefined;
+      throw error;
+    }
+    const raw = JSON.parse(contents) as Record<string, unknown>;
+    if (!raw || raw.pid !== this.#spawnPid || raw.launchId !== this.#launchId || raw.status !== 'failed')
+      return undefined;
+    if (raw.code === 'BOOTSTRAP_UNRECOVERABLE') {
+      return 'Local Collective Service bootstrap_unrecoverable: initialization link cannot be recovered from non-pristine state; preserve data and use owner recovery';
+    }
+    return `Local Collective Service startup failed; see ${join(this.#dataDirectory, SERVICE_LOG_FILE)}`;
   }
 
   async #inspect(): Promise<LocalCollectiveServiceStatus> {
@@ -268,7 +294,7 @@ export class LocalCollectiveServiceManager {
   }
 
   async #recordManagedService(): Promise<void> {
-    await mkdir(this.#dataDirectory, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(this.#dataDirectory);
     const markerPath = join(this.#dataDirectory, MANAGED_MARKER_FILE);
     const contents = `${JSON.stringify({ version: 1, serviceUrl: this.#serviceUrl })}\n`;
     try {
@@ -300,6 +326,10 @@ export class LocalCollectiveServiceManager {
     const environment: Record<string, string> = {};
     for (const key of [
       'HOME',
+      'SystemRoot',
+      'USERPROFILE',
+      'TEMP',
+      'TMP',
       'PATH',
       'USER',
       'LOGNAME',
@@ -322,6 +352,7 @@ export class LocalCollectiveServiceManager {
     environment.COLLECTIVE_SERVICE_PUBLIC_URL = this.#serviceUrl;
     environment.COLLECTIVE_SERVICE_DATA_DIR = this.#dataDirectory;
     environment.COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS = this.#frontendOrigin;
+    if (this.#launchId) environment.COLLECTIVE_SERVICE_LAUNCH_ID = this.#launchId;
     return environment;
   }
 

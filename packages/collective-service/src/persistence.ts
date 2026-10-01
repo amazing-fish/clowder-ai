@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, open, readFile, rename } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { ensurePrivateDirectory, readPrivateFile, writeAtomicPrivate } from '@cat-cafe/shared/node-private-fs';
 
 import { type MutableServiceState, migrateServiceState, parseServiceState, type ServiceState } from './state.js';
 
@@ -41,12 +41,17 @@ export class PersistentServiceState {
     return persistence;
   }
 
-  static async load(dataDirectory: string): Promise<PersistentServiceState> {
+  static async load(
+    dataDirectory: string,
+    prepare?: (state: ServiceState) => Promise<ServiceState>,
+  ): Promise<PersistentServiceState> {
     const filePath = join(dataDirectory, SERVICE_STATE_FILE);
-    const contents = await readFile(filePath, 'utf8');
+    await ensurePrivateDirectory(dataDirectory);
+    const contents = await readPrivateFile(filePath);
     const migrated = migrateServiceState(JSON.parse(contents));
-    if (migrated.migrated) await writeAtomic(filePath, migrated.state);
-    return new PersistentServiceState(filePath, migrated.state);
+    const prepared = prepare ? await prepare(migrated.state) : migrated.state;
+    if (migrated.migrated || prepared !== migrated.state) await writeAtomic(filePath, prepared);
+    return new PersistentServiceState(filePath, prepared);
   }
 
   snapshot(): ServiceState {
@@ -74,20 +79,5 @@ export class PersistentServiceState {
 }
 
 async function writeAtomic(filePath: string, state: ServiceState): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  const handle = await open(temporaryPath, 'wx', 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8' });
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await rename(temporaryPath, filePath);
-  const directoryHandle = await open(dirname(filePath), 'r');
-  try {
-    await directoryHandle.sync();
-  } finally {
-    await directoryHandle.close();
-  }
+  await writeAtomicPrivate(filePath, `${JSON.stringify(state, null, 2)}\n`);
 }
