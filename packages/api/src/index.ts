@@ -1358,6 +1358,7 @@ async function main(): Promise<void> {
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
         () => memoryServices.embeddingLifecycle.getService(),
+        privateUserId,
       );
     },
     getFingerprint,

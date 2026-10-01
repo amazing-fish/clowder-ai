@@ -19,7 +19,7 @@ function expectedCollectionId(projectPath) {
 
 describe('ensureProjectCollection', () => {
   let ensureProjectCollection, LibraryCatalog;
-  let tmpProject, tmpDataDir;
+  let tmpProject, tmpDataDir, stores;
 
   beforeEach(async () => {
     ({ ensureProjectCollection } = await import('../../dist/domains/memory/bootstrap-collection-bridge.js'));
@@ -32,18 +32,19 @@ describe('ensureProjectCollection', () => {
     writeFileSync(join(tmpProject, 'package.json'), JSON.stringify({ name: 'test-proj' }));
 
     tmpDataDir = mkdtempSync(join(tmpdir(), 'f152-data-'));
+    stores = new Map();
   });
 
   afterEach(() => {
+    for (const store of stores.values()) store.close();
     rmSync(tmpProject, { recursive: true, force: true });
     rmSync(tmpDataDir, { recursive: true, force: true });
   });
 
   it('creates collection manifest and indexes docs into evidence store', async () => {
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
 
     assert.ok(result.docsIndexed >= 2, `expected ≥2 docs indexed, got ${result.docsIndexed}`);
     assert.ok(result.durationMs >= 0);
@@ -61,10 +62,9 @@ describe('ensureProjectCollection', () => {
 
   it('skips re-registration if collection already exists in catalog', async () => {
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
-    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
+    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
 
     assert.ok(result1.docsIndexed >= 2);
     assert.ok(result2.docsIndexed >= 0);
@@ -73,9 +73,8 @@ describe('ensureProjectCollection', () => {
   it('persists manifest to collections.json', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
 
     const collectionsPath = join(tmpDataDir, 'library', 'collections.json');
     assert.ok(existsSync(collectionsPath), 'collections.json should be created');
@@ -88,9 +87,8 @@ describe('ensureProjectCollection', () => {
   it('creates store at correct path under dataDir', async () => {
     const { existsSync } = await import('node:fs');
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
 
     const expectedId = expectedCollectionId(tmpProject);
     const safeId = expectedId.replace(/:/g, '-');
@@ -109,10 +107,9 @@ describe('ensureProjectCollection', () => {
     writeFileSync(join(projB, 'docs', 'b.md'), '# Project B');
 
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    await ensureProjectCollection(projA, catalog, stores, tmpDataDir);
-    await ensureProjectCollection(projB, catalog, stores, tmpDataDir);
+    await ensureProjectCollection(projA, catalog, stores, tmpDataDir, undefined, 'owner-a');
+    await ensureProjectCollection(projB, catalog, stores, tmpDataDir, undefined, 'owner-a');
 
     const allManifests = catalog.list();
     const projectManifests = allManifests.filter((m) => m.kind === 'project');
@@ -131,10 +128,9 @@ describe('ensureProjectCollection', () => {
     writeFileSync(join(secretProject, 'leaked.md'), '# Config\n\ntoken: ghp_AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEE\n');
 
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
     await assert.rejects(
-      () => ensureProjectCollection(secretProject, catalog, stores, tmpDataDir),
+      () => ensureProjectCollection(secretProject, catalog, stores, tmpDataDir, undefined, 'owner-a'),
       (err) => {
         assert.ok(err.message.includes('secret'), `error should mention secret: ${err.message}`);
         return true;
@@ -150,9 +146,8 @@ describe('ensureProjectCollection', () => {
     writeFileSync(join(digitProject, 'docs', 'plan.md'), '# Plan');
 
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    const result = await ensureProjectCollection(digitProject, catalog, stores, tmpDataDir);
+    const result = await ensureProjectCollection(digitProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
     assert.ok(result.docsIndexed >= 1);
 
     const expectedId = expectedCollectionId(digitProject);
@@ -164,7 +159,6 @@ describe('ensureProjectCollection', () => {
 
   it('P1-4: wires embeddingService into bootstrap path (production wiring)', async () => {
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
     let embedCallCount = 0;
     const mockEmbeddingService = {
@@ -177,7 +171,14 @@ describe('ensureProjectCollection', () => {
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
     };
 
-    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, () => mockEmbeddingService);
+    const result = await ensureProjectCollection(
+      tmpProject,
+      catalog,
+      stores,
+      tmpDataDir,
+      () => mockEmbeddingService,
+      'owner-a',
+    );
 
     assert.ok(result.docsIndexed >= 2, `expected ≥2 docs, got ${result.docsIndexed}`);
     assert.ok(embedCallCount >= 2, `expected ≥2 embed calls, got ${embedCallCount}`);
@@ -191,12 +192,11 @@ describe('ensureProjectCollection', () => {
 
   it('P2-1: second rebuild reports total docs not just newly indexed', async () => {
     const catalog = new LibraryCatalog();
-    const stores = new Map();
 
-    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result1 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
     assert.ok(result1.docsIndexed >= 2, `first run should index ≥2 docs, got ${result1.docsIndexed}`);
 
-    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir);
+    const result2 = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, undefined, 'owner-a');
     assert.ok(result2.docsIndexed >= 2, `second run should report ≥2 total docs (not 0), got ${result2.docsIndexed}`);
   });
 });
