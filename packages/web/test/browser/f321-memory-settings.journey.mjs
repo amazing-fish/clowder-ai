@@ -93,6 +93,8 @@ export function registerMemorySettingsTests(getRuntime) {
     assert.ok(runtime, 'existing governed browser must be ready');
     const context = await runtime.browser.newContext({ viewport: { width, height: 960 } });
     const page = await context.newPage();
+    // Settings uses synthetic HTTP owners; the shared shell must not register with a live socket server.
+    await page.routeWebSocket('**/socket.io/**', (socket) => socket.close());
     const requests = [];
     const errors = [];
     const trace = [];
