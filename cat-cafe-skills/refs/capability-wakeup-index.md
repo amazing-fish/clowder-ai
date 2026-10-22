@@ -18,7 +18,7 @@ L0 §8 trigger 写了 ≠ 猫真用。判断"为什么 miss + 怎么修"必须�
 
 **筛子 0 — Reachability（这能力当前 context 调得到吗？怎么调？）**
 - ❌ 调不到 / trigger 没写"怎么调" → 猫误判"这是别人的工具"，100% miss。**修法 = 补"怎么调"一行，不是 hook**。
-- 教训（2026-05-27）：opus-47 断言"terminal 调不了 workspace-navigator"——纯脑补没 verify（「我能猜出来」病）。当时底层 API 可由 Bash 直调；F223 Phase B 后主路径升级为 `cat_cafe_workspace_navigate` typed MCP。**一个你以为够不着的能力，miss 不是因为懒，是从没进考虑**——独立于"偷懒"的失败域，药方相反（补可达性 ≠ 上 forcing function）。
+- 教训（2026-05-27）：opus-47 断言"terminal 调不了 workspace-navigator"——纯脑补没 verify（未核验工具可达性）。当时底层 API 可由 Bash 直调；F223 Phase B 后主路径升级为 `cat_cafe_workspace_navigate` typed MCP。**一个你以为够不着的能力，miss 不是因为懒，是从没进考虑**——独立于"偷懒"的失败域，药方相反（补可达性 ≠ 上 forcing function）。
 
 **筛子 1 — Enforcement Tier（过了筛子 0 才分）**
 - **Tier A · episodic**：需要时自然想起，无零摩擦偷懒竞品。L0 advisory 够。例：`start_vote` / `expert-panel` / `deep-research`
@@ -246,7 +246,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **坏直觉**：阶段成果只发一堆 commits / markdown
 **场景 trigger**：
-- Showcase 视频 / 教程录屏
+- 一句话要一支视频 / Showcase / 教程录屏（Remotion 搭，先出样张自审）
 - HTML PPT slide / 海报
 - 对外技术博客 / 公众号
 
@@ -284,16 +284,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **场景 trigger**：Siamese / Antigravity carrier 或 model sticky 行为异常
 **Source**：`docs/architecture/cli-integration.md` + F210
 
-### 23. `enterprise-workflow` — 飞书 / 企微 IM 产物
-
-**坏直觉**：只想到普通 chat
-**场景 trigger**：
-- 文档 / 表格 / 待办 / 会议 / 日程
-- 一句话生成完整工作流
-
-**Pipeline**：`lark-*` skill 家族（lark-doc / lark-base / lark-task / lark-calendar / etc.）
-
-### 24. `capability-evolution` — F311 能力进化入口
+### 23. `capability-evolution` — F311 能力进化入口
 
 **坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
 

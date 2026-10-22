@@ -11,7 +11,7 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * (future); v1 only sees public/internal collections.
  */
 
-import { formatRecallMeta } from '@cat-cafe/shared';
+import { deploymentDefaults, formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -21,7 +21,7 @@ const defineTool = defineMcpMigrationFactory('recent-tools.ts', undefined, {
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 
 export const listRecentInputSchema = {
   scope: z
@@ -180,7 +180,7 @@ function formatRecent(data: RecentResponse, since: string): string {
 
 function crossReferenceFooter(): string {
   return [
-    '— Clowder AI 7-tool memory family —',
+    `— ${deploymentDefaults.brand.displayName} 7-tool memory family —`,
     '  search_evidence: semantic / fuzzy find (lexical/semantic/hybrid)',
     '  graph_resolve: precise anchor / relations',
     '  list_recent: zero-prior / scan recent (this tool)',
@@ -206,7 +206,13 @@ export const recentTools = [
       implementationExport: 'handleListRecent',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      runtimeProfiles: [
+        'full',
+        'readonly',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
     },
   }),
 ] as const;

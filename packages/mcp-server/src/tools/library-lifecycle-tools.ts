@@ -10,6 +10,7 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * Visibility is server-derived; v1 sees all localhost-owned collections.
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -19,7 +20,13 @@ const defineTool = defineMcpMigrationFactory('library-lifecycle-tools.ts', undef
   authority: 'local-runtime',
 });
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
+
+function libraryAuthHeaders(): Record<string, string> {
+  return {
+    'x-cat-cafe-user': process.env['CAT_CAFE_USER_ID']?.trim() || 'default-user',
+  };
+}
 
 // --- library_list ---
 
@@ -43,7 +50,7 @@ interface CatalogItem {
 
 export async function handleLibraryList(input: { status?: string | undefined }): Promise<ToolResult> {
   try {
-    const response = await fetch(`${API_URL}/api/library/catalog`);
+    const response = await fetch(`${API_URL}/api/library/catalog`, { headers: libraryAuthHeaders() });
     if (!response.ok) {
       const text = await response.text();
       return errorResult(`library_list failed (${response.status}): ${text}`);
@@ -91,7 +98,7 @@ export async function handleLibraryDryRun(input: {
     if (input.exclude) body.exclude = input.exclude;
     const response = await fetch(`${API_URL}/api/library/bind-dry-run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -152,7 +159,7 @@ export async function handleLibraryCreate(input: {
     if (input.exclude) body.exclude = input.exclude;
     const response = await fetch(`${API_URL}/api/library/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -163,7 +170,10 @@ export async function handleLibraryCreate(input: {
 
     let rebuildWarning = '';
     try {
-      const rebuildRes = await fetch(`${API_URL}/api/library/${id}/rebuild`, { method: 'POST' });
+      const rebuildRes = await fetch(`${API_URL}/api/library/${id}/rebuild`, {
+        method: 'POST',
+        headers: libraryAuthHeaders(),
+      });
       if (!rebuildRes.ok) {
         rebuildWarning = `\n\nWarning: rebuild failed (${rebuildRes.status}). Run cat_cafe_library_rebuild manually.`;
       } else {
@@ -211,7 +221,7 @@ export async function handleLibraryRebuild(input: {
     if (input.force) body.force = true;
     const response = await fetch(`${API_URL}/api/library/${input.collectionId}/rebuild`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -244,6 +254,7 @@ export async function handleLibraryArchive(input: { collectionId: string }): Pro
   try {
     const response = await fetch(`${API_URL}/api/library/${input.collectionId}/archive`, {
       method: 'POST',
+      headers: libraryAuthHeaders(),
     });
     if (!response.ok) {
       const text = await response.text();

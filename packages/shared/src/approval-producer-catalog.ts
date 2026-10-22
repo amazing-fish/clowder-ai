@@ -51,8 +51,6 @@ export interface ApprovalProducerCatalogEntry {
    *   F276 — candidate `sourceRef` can come from an owner-validated deferred receipt
    *          or owner evidence rather than one InvocationRecord; needs scheduler /
    *          deferred route coverage before it could be attested.
-   *   F292 — MeetingIntake lands through signal admission and never calls
-   *          ApprovalIngress.publish, so this value has no effect on this ingress.
    */
   systemOriginExemption: 'server_attested' | 'forbidden';
   history: boolean;
@@ -184,18 +182,6 @@ export const APPROVAL_PRODUCER_CATALOG = {
     history: true,
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
   },
-  F292: {
-    lifecycleVersion: 1,
-    label: '会议',
-    badgeLabel: 'Meeting',
-    colorToken: 'var(--semantic-info, #3b82f6)',
-    decisionEndpointBase: '/api/meeting-intakes',
-    decisionSurface: 'approval_hub',
-    sourcePolicy: 'message-or-event',
-    systemOriginExemption: 'forbidden',
-    history: true,
-    humanDispositionReasonCodes: null,
-  },
   F306: {
     lifecycleVersion: 1,
     label: '运行',
@@ -211,6 +197,22 @@ export const APPROVAL_PRODUCER_CATALOG = {
     // shared ingress validation is reused later.
     systemOriginExemption: 'server_attested',
     history: false,
+    humanDispositionReasonCodes: null,
+  },
+  F321: {
+    lifecycleVersion: 1,
+    label: '记忆更正',
+    badgeLabel: 'Memory correction',
+    colorToken: 'var(--accent-event, #f97316)',
+    decisionEndpointBase: '/api/event-memory-corrections',
+    decisionSurface: 'approval_hub',
+    sourcePolicy: 'message-or-event',
+    // DIRECT binding: callback-propose-event-memory-correction derives owner,
+    // cat, thread, invocation and approval origin from the authenticated
+    // InvocationRecord. The request body can only name an owner-scoped Event
+    // id plus its exact revision; original source coordinates come from Event.
+    systemOriginExemption: 'server_attested',
+    history: true,
     humanDispositionReasonCodes: null,
   },
   F266: {
@@ -239,8 +241,8 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F260',
   'F266',
   'F221',
+  'F321',
   'F276',
-  'F292',
   'F306',
 ] as const satisfies readonly ApprovalProducerId[]);
 

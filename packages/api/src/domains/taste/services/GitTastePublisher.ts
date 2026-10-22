@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { retainPublishedTasteSnapshot } from './PublishedTasteSnapshot.js';
 
 export interface GitTastePublicationAttempt {
   attempt: number;
@@ -104,7 +106,7 @@ async function prepareCheckout(sourceRoot: string, checkoutRoot: string, branchN
   await runGit(sourceRoot, ['clone', '--no-checkout', '--shared', sourceRoot, checkoutRoot]);
   await runGit(checkoutRoot, ['remote', 'set-url', 'origin', originUrl]);
   await runGit(checkoutRoot, ['config', 'core.hooksPath', hooksPath]);
-  await runGit(checkoutRoot, ['config', 'user.name', 'Clowder AI Taste Publisher']);
+  await runGit(checkoutRoot, ['config', 'user.name', `${deploymentDefaults.brand.name} Taste Publisher`]);
   await runGit(checkoutRoot, ['config', 'user.email', 'taste-publisher@cat-cafe.local']);
   await runGit(checkoutRoot, ['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
   const baseSha = await runGit(checkoutRoot, ['rev-parse', 'refs/remotes/origin/main']);
@@ -183,10 +185,10 @@ export async function publishTasteProjection(
       const baseSha = await prepareCheckout(input.sourceRoot, checkoutRoot, branchName);
       const materialized = input.materialize(checkoutRoot);
       if (materialized === 'already-published') {
-        return {
+        return await retainResult(input.sourceRoot, checkoutRoot, {
           commitSha: await findExistingProjectionCommit(checkoutRoot, input.filesToCommit[0]),
           alreadyPublished: true,
-        };
+        });
       }
 
       await runGit(checkoutRoot, ['add', '--', ...input.filesToCommit]);
@@ -203,9 +205,9 @@ export async function publishTasteProjection(
       } catch (pushError) {
         const resolution = await resolveFailedPush(pushError, checkoutRoot, baseSha, attempt, input);
         if (resolution === 'retry') continue;
-        return resolution;
+        return await retainResult(input.sourceRoot, checkoutRoot, resolution);
       }
-      return { commitSha, alreadyPublished: false };
+      return await retainResult(input.sourceRoot, checkoutRoot, { commitSha, alreadyPublished: false });
     } catch (error) {
       if (isTastePublicationIndeterminateError(error)) throw error;
       throw new Error(`Taste publication failed: ${errorMessage(error)}`);
@@ -215,4 +217,15 @@ export async function publishTasteProjection(
   }
 
   throw new Error(`Taste publication failed after ${PUBLICATION_ATTEMPTS} attempts`);
+}
+
+async function retainResult(sourceRoot: string, checkoutRoot: string, result: GitTastePublicationResult) {
+  try {
+    await retainPublishedTasteSnapshot(sourceRoot, checkoutRoot);
+    return result;
+  } catch (error) {
+    throw new TastePublicationIndeterminateError(
+      `Taste reached origin/main but its canonical read snapshot could not be retained: ${errorMessage(error)}`,
+    );
+  }
 }

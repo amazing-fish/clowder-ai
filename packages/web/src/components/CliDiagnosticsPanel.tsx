@@ -84,13 +84,14 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // Tier 2 — transient, retry later
   quota_exceeded: { ...PALETTE_TRANSIENT, Icon: GaugeIcon },
   network_error: { ...PALETTE_TRANSIENT, Icon: CloudOffIcon },
+  upstream_service_error: { ...PALETTE_TRANSIENT, Icon: CloudOffIcon },
+  stream_disconnected: { ...PALETTE_TRANSIENT, Icon: CloudOffIcon },
   // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): Anthropic server-side
   // temporary throttling — NOT user quota. Same transient tier (retry 30-60s) but distinct
   // hourglass icon to differentiate from gauge (quota) at-a-glance.
   server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_response_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
-  active_writer_recovery: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
@@ -187,6 +188,8 @@ function sanitizePathLeaks(s: string): string {
 }
 
 interface CliDiagnosticsPanelProps {
+  /** A failed reply already owns its failure text; append only guidance and detail controls. */
+  detailsOnly?: boolean;
   /** The bubble's display content (`Error: ...`). Falls back if publicSummary missing. */
   errorMessage: string;
   diagnostics: CliDiagnostics;
@@ -199,7 +202,12 @@ interface CliDiagnosticsPanelProps {
   dedupCount?: number;
 }
 
-export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: CliDiagnosticsPanelProps) {
+export function CliDiagnosticsPanel({
+  errorMessage,
+  diagnostics,
+  dedupCount,
+  detailsOnly = false,
+}: CliDiagnosticsPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   // 云端 codex P2 (2026-05-27): membership check before indexing — stale/newer/malformed
@@ -225,40 +233,50 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
   const hasExitCode = Object.prototype.hasOwnProperty.call(diagnostics.debugRef, 'exitCode');
 
   return (
-    <div data-testid="cli-diagnostics" className="flex flex-col gap-2.5">
+    <div
+      data-testid="cli-diagnostics"
+      className={`flex flex-col gap-2.5${detailsOnly ? ' [--cli-diag-meta:currentColor] [--cli-diag-hint:currentColor]' : ''}`}
+    >
       {/* Error banner */}
-      <div
-        data-testid="cli-diagnostics-banner"
-        className="flex items-start gap-2.5 rounded-xl"
-        style={{ backgroundColor: bg, border: `1px solid ${border}`, padding: '10px 14px' }}
-      >
-        <Icon
-          className="w-4 h-4 flex-shrink-0 mt-0.5"
-          style={{ color: accent }}
-          ariaLabel={knownReason ?? 'cli-error-unknown'}
-        />
-        <div className="flex flex-col gap-1 min-w-0">
-          <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: text }}>
-            <span>{summary}</span>
-            {dedupCount !== undefined && dedupCount > 1 && (
-              <span
-                data-testid="cli-diagnostics-dedup-badge"
-                role="img"
-                aria-label={`Same error occurred ${dedupCount} times`}
-                className="text-xs font-normal px-1.5 py-0.5 rounded"
-                style={{ backgroundColor: accent, color: bg }}
-              >
-                ×{dedupCount}
+      {!detailsOnly && (
+        <div
+          data-testid="cli-diagnostics-banner"
+          className="flex items-start gap-2.5 rounded-xl"
+          style={{ backgroundColor: bg, border: `1px solid ${border}`, padding: '10px 14px' }}
+        >
+          <Icon
+            className="w-4 h-4 flex-shrink-0 mt-0.5"
+            style={{ color: accent }}
+            ariaLabel={knownReason ?? 'cli-error-unknown'}
+          />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: text }}>
+              <span>{summary}</span>
+              {dedupCount !== undefined && dedupCount > 1 && (
+                <span
+                  data-testid="cli-diagnostics-dedup-badge"
+                  role="img"
+                  aria-label={`Same error occurred ${dedupCount} times`}
+                  className="text-xs font-normal px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: accent, color: bg }}
+                >
+                  ×{dedupCount}
+                </span>
+              )}
+            </span>
+            {diagnostics.publicHint && (
+              <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
+                {diagnostics.publicHint}
               </span>
             )}
-          </span>
-          {diagnostics.publicHint && (
-            <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
-              {diagnostics.publicHint}
-            </span>
-          )}
+          </div>
         </div>
-      </div>
+      )}
+      {detailsOnly && diagnostics.publicHint ? (
+        <p className="m-0 text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
+          {diagnostics.publicHint}
+        </p>
+      ) : null}
 
       {/* Excerpt toggle — only shown when Phase A populated safeExcerpt (reasonCode whitelisted) */}
       {hasExcerpt && (
@@ -266,6 +284,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           <button
             type="button"
             data-testid="cli-diagnostics-toggle"
+            aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1.5 cursor-pointer bg-transparent border-none p-0 self-start"
           >
@@ -277,7 +296,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
               查看详细错误
             </span>
           </button>
-          {expanded && (
+          {expanded && hasExcerpt && (
             <pre
               data-testid="cli-diagnostics-excerpt"
               className="rounded-lg overflow-x-auto whitespace-pre-wrap break-words text-xs font-mono m-0"
@@ -294,7 +313,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
         </>
       )}
 
-      {/* debugRef strip — always shown (no secrets, safe to expose) */}
+      {/* Standalone error metadata */}
       <div
         data-testid="cli-diagnostics-debug-ref"
         className="flex flex-wrap gap-x-3 gap-y-1 text-xs"
@@ -316,10 +335,19 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           </span>
         )}
         {diagnostics.debugRef.invocationId && (
-          <span>
-            <span className="font-medium">invocationId:</span> {truncateMiddle(diagnostics.debugRef.invocationId, 32)}
+          <span className="break-all" title={diagnostics.debugRef.invocationId}>
+            <span className="font-medium">invocationId:</span>{' '}
+            {detailsOnly ? diagnostics.debugRef.invocationId : truncateMiddle(diagnostics.debugRef.invocationId, 32)}
           </span>
         )}
+        {diagnostics.debugRef.upstreamRequestId &&
+          /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+            diagnostics.debugRef.upstreamRequestId,
+          ) && (
+            <span className="break-all">
+              <span className="font-medium">request ID:</span> {diagnostics.debugRef.upstreamRequestId}
+            </span>
+          )}
         {DEBUG_REF_CONTEXT_FIELDS.map(([key, label]) => {
           const value = diagnostics.debugRef[key];
           return value ? (

@@ -1,6 +1,83 @@
 {
   "exceptions": [
     {
+      "path": "packages/api/src/domains/collaborative-content/artifact-review",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5799 adds response-judgment and response-judgment-return, taking this directory from 24 to 26 files. They share the review reducer, return intent, sealed audience and owner revision checks. Keep those reviewed boundaries intact for this export; reassess a response/return subgroup with its store imports before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F326 / cat-cafe#5799 / clowder-ai#1649"
+    },
+    {
+      "path": "packages/api/src/domains/workspace",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5799 adds workspace-video-snapshot, taking this directory from 24 to 25 files. The request-scoped immutable copy shares the existing workspace source revision, stream lifetime and security errors. Reassess the content-source/video snapshot subgroup together before expiry rather than move one authority-sensitive adapter only to reduce this count.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F063/F326 / cat-cafe#5799 / clowder-ai#1649"
+    },
+    {
+      "path": "packages/api/src/infrastructure/capability-evolution/adapters",
+      "owner": "codex-astra",
+      "reason": "2026-10-21 daily sync: reviewed #5854 adds archive-source-repository, taking this directory from 24 to 25 files. The shared immutable historical repository identity is consumed by the Microduck and request-review adapters; it must not become deployment branding. Reassess an archive-provenance module boundary with all consumers before expiry, preserving those signed source coordinates.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F330/F311 / cat-cafe#5854 / clowder-ai#1649"
+    },
+    {
+      "path": "packages/api/src/domains/collaborative-content/collective-artifact",
+      "owner": "codex61-sol",
+      "reason": "2026-10-18 W4 source fix-forward: #5670 introduced 28 files for shared Markdown, retained media and custody transfer. Keep the independently reviewed owner/receipt boundaries stable during Alpha acceptance; reassess Markdown, media and custody subdirectories together with their import directions before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
+    },
+    {
+      "path": "packages/api/src/domains/collaborative-content/modification",
+      "owner": "codex61-sol",
+      "reason": "2026-10-18 W4 source fix-forward: #5670 grew this directory from 23 to 27 files with collective acceptance, custody snapshots and resolution. These adapters share the existing modification journal and settlement lifecycle; reassess a collective adapter subgroup without splitting effect/receipt recovery across owners before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
+    },
+    {
+      "path": "packages/api/src/domains/collaborative-content/workspace-review",
+      "owner": "codex61-sol",
+      "reason": "2026-10-18 W4 source fix-forward: #5670 grew this directory from 24 to 26 files with the two collective custody adapters. Preserve the reviewed public/private review-source boundary during acceptance; reassess custody and source-adapter grouping with the existing composition root before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
+    },
+    {
+      "path": "packages/api/src/domains/plugin/builtin-runtime",
+      "owner": "codex61-sol",
+      "reason": "2026-10-18 W4 source fix-forward: #5670 grew this directory from 24 to 25 files with collective-artifact-command.ts. Keep the existing Host verifier and invocation composition imports stable while the parallel F290 UI integration proceeds; reassess the artifact command versus participation/runtime adapter boundary before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
+    },
+    {
+      "path": "packages/api/src/domains/video-studio/content-owner",
+      "owner": "codex61-sol",
+      "reason": "2026-10-18 W4 source fix-forward: #5670 grew this directory from 20 to 25 files with collective scope, snapshot, custody fence, validation and errors. Keep owner effect/receipt and private/public isolation imports stable; #5712 concurrently changes this owner. Reassess collective custody and publication subgroups with the content owner before expiry.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F290 W4 / cat-cafe#5670 / clowder-ai#1614"
+    },
+    {
+      "path": "packages/api/src/domains/concierge/live",
+      "owner": "codex-astra",
+      "reason": "2026-10-13 public sync: 24 to 27 files after F317 presentation observations, response timing and native subexecution records. These readers share the existing live-call lifecycle; retain the reviewed import boundaries for this cut and reassess an observation/projection split before expiry.",
+      "expiresAt": "2026-10-27",
+      "ticket": "F317 / clowder-ai#1589"
+    },
+    {
+      "path": "packages/api/src/domains/concierge/live/host",
+      "owner": "codex-astra",
+      "reason": "2026-10-13 public sync: 24 to 25 files after F317 late-result notices. The notice adapter belongs to the current Host result-return lifecycle. Avoid moving that reviewed authority boundary solely to reduce the count; reassess the Host adapter grouping before expiry.",
+      "expiresAt": "2026-10-27",
+      "ticket": "F317 / clowder-ai#1589"
+    },
+    {
+      "path": "packages/api/src/domains/growing",
+      "owner": "codex-astra",
+      "reason": "2026-10-13 public sync: 24 to 31 files after F310 authenticated human-terminal and Task-execution evidence readers. Keep the reviewed Task-owned contracts intact in this cut; evaluate human-terminal and execution-read subdirectories with their import/authority boundaries before expiry.",
+      "expiresAt": "2026-10-27",
+      "ticket": "F310 / clowder-ai#1589"
+    },
+    {
       "path": "packages/api/src/domains/cats/services/agents/routing",
       "owner": "opus-48",
       "reason": "2026-08-31 renewal (F23 gate option b — freshness/ real split in same PR). 33 files. Agent routing + artifact tracking remain one unsplit agents subdomain.",
@@ -64,6 +141,13 @@
       "ticket": "F192"
     },
     {
+      "path": "packages/api/src/infrastructure/harness-eval/publish-verdict",
+      "owner": "opus",
+      "reason": "2026-09-20 R10 extraction: validate-publish-input.ts + verdict-source-types.ts split from types.ts/publish-verdict.ts for 350-line cap. 27 files. Reabsorb when adapter files consolidate.",
+      "expiresAt": "2026-10-31",
+      "ticket": "F192"
+    },
+    {
       "path": "packages/api/src/domains/cats/services/stores/redis",
       "owner": "opus",
       "reason": "2026-08-31 renewal (F23 gate option b). 50 files. Redis implementations should split with their proposal/community/session domains.",
@@ -90,13 +174,6 @@
       "reason": "2026-08-31 renewal. 51 files. People memory mixes identity, proposal lifecycle, disposition proofs, Redis persistence; F276/F281/F282 own split.",
       "expiresAt": "2026-10-31",
       "ticket": "F276/F281/F282"
-    },
-    {
-      "path": "packages/api/src/domains/cats/services/session",
-      "owner": "codex-sol",
-      "reason": "2026-09-16 census: 33 files. First bounded renewal of the F296/F299 exception added in #3876. Transcript persistence, session lifecycle, context presentation, and invocation trajectory still require an ownership-led split; this renewal does not claim that split is delivered. Keep existing import and persistence contracts stable during the reviewed public sync; the F296/F299 owner retains the split debt. Retire the separate redis-keys exception: its 24 root files are below the hard threshold.",
-      "expiresAt": "2026-09-30",
-      "ticket": "F296/F299"
     }
   ]
 }

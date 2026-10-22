@@ -1,3 +1,4 @@
+import type { PluginWaitState } from './plugin-wait.js';
 /**
  * Task Types (毛线球)
  * 猫猫任务系统 — 让每只猫追踪自己负责的事项
@@ -10,7 +11,8 @@
 import { z } from 'zod';
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
-import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
+import type { DeploymentWaitStateV1 } from './deployment-wait.js';
+import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, GitHubWaitOutcomeV1 } from './github-wait.js';
 import type { EntrustedWorkV1 } from './growing.js';
 import type { CatId } from './ids.js';
 
@@ -154,7 +156,7 @@ export interface PrAutomationState {
   readonly review?: ReviewAutomationState;
   readonly closedAt?: number;
   readonly await?: GitHubPrAwaitStateV1;
-  readonly waitOutcome?: WaitOutcomeV1;
+  readonly waitOutcome?: GitHubWaitOutcomeV1;
   /** Type-level quarantine: issue compatibility cannot be installed on a PR state. */
   readonly issue?: never;
 }
@@ -164,7 +166,7 @@ export interface IssueWaitAutomationState {
   readonly issue?: IssueAutomationState;
   readonly closedAt?: number;
   readonly await?: GitHubIssueAwaitStateV1;
-  readonly waitOutcome?: WaitOutcomeV1;
+  readonly waitOutcome?: GitHubWaitOutcomeV1;
   /** Type-level quarantine: PR facts cannot be installed on an issue state. */
   readonly ci?: never;
   readonly conflict?: never;
@@ -187,6 +189,7 @@ export type TaskProbeSpec =
     };
 
 export interface TaskItem {
+  readonly pluginWait?: PluginWaitState;
   readonly id: string;
   /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
   readonly kind: TaskKind;
@@ -207,6 +210,8 @@ export interface TaskItem {
   readonly updatedAt: number;
   /** PR tracking automation state (#320 KD-14). Only present for kind=pr_tracking. */
   readonly automationState?: AutomationState;
+  /** F323: one deployment await/outcome aggregate for an original work Task. */
+  readonly deploymentWait?: DeploymentWaitStateV1;
   /** User who registered this task (for ownership checks). */
   readonly userId?: string;
   /** Source message ID for traceability (4-A feature) */

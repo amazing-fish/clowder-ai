@@ -13,7 +13,14 @@ export const collectiveParticipantAgentSchema = z
   .object({
     catId: z.string().trim().min(1).max(120),
     displayName: z.string().trim().min(1).max(120),
+    displayLabel: z.string().trim().min(1).max(120).optional(),
     channelIds: z.array(z.string().trim().min(1).max(160)).min(1).max(100),
+    description: z.string().trim().min(1).max(120).optional(),
+    avatarDataUrl: z
+      .string()
+      .max(1_200)
+      .regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/)
+      .optional(),
   })
   .strict();
 
@@ -37,7 +44,14 @@ export const collectiveParticipantSchema = collectiveConnectionCoordinatesSchema
     humanDisplayName: z.string().min(1).max(120),
     catId: z.string().min(1).max(120),
     displayName: z.string().min(1).max(120),
+    displayLabel: z.string().trim().min(1).max(120).optional(),
     channelIds: z.array(z.string()),
+    description: z.string().trim().min(1).max(120).optional(),
+    avatarDataUrl: z
+      .string()
+      .max(1_200)
+      .regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/)
+      .optional(),
     participationRevision: z.number().int().positive(),
     availability: z.enum(['declared', 'revoked']),
   })

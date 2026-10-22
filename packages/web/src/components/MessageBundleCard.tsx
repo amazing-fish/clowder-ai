@@ -1,23 +1,21 @@
 'use client';
 
+import {
+  type MessageSelectionProjectedItem as BundleItem,
+  type HydratedMessageBundle,
+  isHydratedMessageBundle,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { HubIcon } from './hub-icons';
-import { type BundleItem, MessageBundleItemView } from './MessageBundleItemView';
+import { MessageBundleItemView } from './MessageBundleItemView';
+import { messageBundleSenderLabel } from './message-bundle-sender';
+import { MessageBundlePaperCard } from './message-v2/MessageBundlePaperCard';
+import { useShellPresentation } from './shell/shell-presentation';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-
-interface HydratedMessageBundle {
-  messageBundleId: string;
-  targetThreadId: string;
-  createdBy: string;
-  createdAt: number;
-  note?: string;
-  sourceThread: { id: string; title: string } | null;
-  items: BundleItem[];
-}
 
 interface MessageBundleCardProps {
   messageId: string;
@@ -25,7 +23,13 @@ interface MessageBundleCardProps {
   getCatLabel: (catId: string) => string;
 }
 
-export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: MessageBundleCardProps) {
+export function MessageBundleCard(props: MessageBundleCardProps) {
+  // A different carrier starts a different read, including its fold and error state.
+  return <MessageBundleRead key={props.messageId} {...props} />;
+}
+
+function MessageBundleRead({ messageId, forwarderName, getCatLabel }: MessageBundleCardProps) {
+  const presentation = useShellPresentation();
   const currentThreadId = useChatStore((state) => state.currentThreadId);
   const [data, setData] = useState<HydratedMessageBundle | null>(null);
   const [error, setError] = useState(false);
@@ -33,23 +37,40 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    void requestVersion;
     const controller = new AbortController();
     setError(false);
-    void apiFetch(`/api/message-bundles/${encodeURIComponent(messageId)}`, { signal: controller.signal })
+    void apiFetch(
+      `/api/message-bundles/${encodeURIComponent(messageId)}`,
+      { signal: controller.signal },
+      { afterCurrentGet: requestVersion > 0 },
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error(`Message Bundle hydration failed (${response.status})`);
-        const body = (await response.json()) as HydratedMessageBundle;
-        if (!body || body.messageBundleId !== messageId || !Array.isArray(body.items)) {
+        const body: unknown = await response.json();
+        if (!isHydratedMessageBundle(body) || body.messageBundleId !== messageId) {
           throw new Error('Invalid Message Bundle response');
         }
-        setData(body);
+        if (!controller.signal.aborted) setData(body);
       })
-      .catch((cause) => {
-        if ((cause as { name?: string }).name !== 'AbortError') setError(true);
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setData(null);
+          setError(true);
+        }
       });
     return () => controller.abort();
   }, [messageId, requestVersion]);
+
+  const reload = () => {
+    setData(null);
+    setError(false);
+    setRequestVersion((version) => version + 1);
+  };
+  const toggle = () => {
+    setExpanded(!expanded);
+    // Both presentations reauthorize before revealing the full source.
+    if (!expanded) reload();
+  };
 
   const jumpToSource = useCallback(
     (threadId: string, sourceMessageId?: string) => {
@@ -68,6 +89,21 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
     [currentThreadId],
   );
 
+  if (presentation === 'v2')
+    return (
+      <MessageBundlePaperCard
+        messageId={messageId}
+        data={data}
+        error={error}
+        expanded={expanded}
+        forwarderName={forwarderName}
+        getCatLabel={getCatLabel}
+        onJump={jumpToSource}
+        onRetry={reload}
+        onToggle={toggle}
+      />
+    );
+
   if (error) {
     return (
       <div role="alert" className="rounded-xl border border-semantic-danger/40 bg-cafe-surface-sunken p-3 text-sm">
@@ -75,7 +111,7 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
         <button
           type="button"
           className="mt-2 rounded-md border border-cafe px-2 py-1 text-xs text-cafe-interactive hover:bg-cafe-surface"
-          onClick={() => setRequestVersion((version) => version + 1)}
+          onClick={reload}
         >
           重试
         </button>
@@ -95,13 +131,7 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
   const singleItem = data.items.length === 1 ? data.items[0] : undefined;
   const participants = [
     ...new Set(
-      availableItems.map((item) =>
-        item.author.kind === 'cat'
-          ? getCatLabel(item.author.catId)
-          : item.author.userId === data.createdBy
-            ? forwarderName
-            : item.author.userId,
-      ),
+      availableItems.map((item) => messageBundleSenderLabel(item.from, data.createdBy, forwarderName, getCatLabel)),
     ),
   ];
   const sourceTitle = data.sourceThread?.title ?? '来源不可用';
@@ -158,7 +188,7 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
             type="button"
             className="mt-3 w-full rounded-lg border border-cafe px-3 py-2 text-left text-sm font-medium text-cafe-secondary hover:bg-cafe-surface-sunken"
             aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={toggle}
           >
             {expanded ? '收起聊天记录' : `展开 ${data.items.length} 条聊天记录`}
           </button>

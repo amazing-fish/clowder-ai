@@ -4,6 +4,7 @@
  */
 
 import type { CliConfig } from './cat-breed.js';
+import type { CatCarrier } from './cat-carrier.js';
 import type { CatId, SessionId } from './ids.js';
 import { createCatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
@@ -17,6 +18,7 @@ export type ClientId =
   | 'openai'
   | 'google'
   | 'kimi'
+  | 'pi'
   | 'antigravity'
   | 'opencode'
   | 'a2a'
@@ -45,6 +47,8 @@ export interface CatColor {
  */
 export interface AgyProfileConfig {
   readonly enabled?: boolean;
+  /** F325 staged migration: each profile has exactly one selected execution carrier. */
+  readonly carrier?: 'legacy' | 'native' | 'acp';
   readonly profileId?: string;
   readonly homeRoot?: string;
   readonly model?: string;
@@ -56,6 +60,7 @@ export interface AgyProfileConfig {
  * Cat configuration (immutable)
  */
 export interface CatConfig {
+  readonly accountBindingMode?: 'follow' | 'override';
   readonly id: CatId;
   readonly name: string;
   readonly displayName: string;
@@ -65,8 +70,12 @@ export interface CatConfig {
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;
+  /** Native tools own authentication and omitted model/effort defaults. */
+  readonly configurationSource?: 'native_tool' | 'managed_account';
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
+  /** Canonical, config-resolved member access mode. */
+  readonly carrier: CatCarrier;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly cli?: CliConfig;

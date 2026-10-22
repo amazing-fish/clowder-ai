@@ -163,6 +163,43 @@ test('spawnCli: 无 stdinInput 时 stdio[0]=ignore (向后兼容，不影响其�
   assert.equal(spawnFn.mock.calls[0].arguments[2].stdio[0], 'ignore');
 });
 
+test('spawnCli defers stdin until its caller verifies a provider event and prevents writes after closure', async () => {
+  const proc = createMockProcess();
+  proc.stdin = new PassThrough();
+  let body = '',
+    write;
+  proc.stdin.on('data', (chunk) => {
+    body += chunk;
+  });
+  const close = new AbortController();
+  const iterator = spawnCli(
+    {
+      command: 'test-cli',
+      args: [],
+      onStdinReady: (writer) => {
+        write = writer;
+      },
+      stdinCloseSignal: close.signal,
+    },
+    { spawnFn: createMockSpawnFn(proc) },
+  );
+  try {
+    const pending = iterator.next();
+    proc.stdout.write('{"event":"init"}\n');
+    assert.equal((await pending).value.event, 'init');
+    assert.equal(body, '');
+    assert.equal(typeof write, 'function');
+    write('verified prompt\n');
+    assert.equal(body, 'verified prompt\n');
+    close.abort();
+    assert.throws(() => write('too late'), /stdin.*closed/);
+  } finally {
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+    await iterator.return();
+  }
+});
+
 test(
   'spawnCli default spawn supervisors Unix CLI children with parent pid',
   { skip: process.platform === 'win32' && 'Unix supervisor is not used on Windows' },
@@ -643,12 +680,16 @@ test('spawnCli defaults to manual-cancel-only when CLI_TIMEOUT_MS is unset', asy
   try {
     const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
 
+    assert.deepEqual(delays, [], 'a running CLI must not acquire a response deadline by default');
     proc.stdout.end();
     proc._emitter.emit('exit', 0, null);
     await promise;
 
     assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'automatic CLI timeout must be opt-in');
-    assert.deepEqual(delays, [], 'unset CLI_TIMEOUT_MS must not arm an automatic response timeout');
+    assert.ok(
+      delays.every((delay) => delay <= 1_000),
+      'only the post-exit stdio drain may be bounded',
+    );
     assert.equal(proc.kill.mock.callCount(), 0, 'manual-cancel-only default must not signal the process');
   } finally {
     global.setTimeout = originalSetTimeout;
@@ -796,6 +837,84 @@ test('spawnCli removes inherited env vars when override is null', async () => {
   else process.env.SPAWN_DELETE_ME = saved;
 });
 
+test('explicit CLI environment does not inherit unrelated runtime credentials', () => {
+  const saved = process.env.F325_AMBIENT_SECRET;
+  try {
+    process.env.F325_AMBIENT_SECRET = 'fake-runtime-secret';
+    const childEnv = buildChildEnv(
+      { HOME: '/tmp/f325-isolated-home', PATH: '/usr/bin:/bin', CAT_CAFE_CALLBACK_TOKEN: null },
+      { inheritParentEnv: false, workingDirectory: '/tmp/f325-workspace' },
+    );
+    assert.equal(childEnv.F325_AMBIENT_SECRET, undefined);
+    assert.equal(childEnv.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(childEnv.HOME, '/tmp/f325-isolated-home');
+    assert.equal(childEnv.PWD, '/tmp/f325-workspace');
+  } finally {
+    if (saved === undefined) delete process.env.F325_AMBIENT_SECRET;
+    else process.env.F325_AMBIENT_SECRET = saved;
+  }
+});
+
+test('API-only Jev credentials and page configuration do not reach an actual agent child', () => {
+  const keys = ['TYPESAFE_API_KEY', 'TYPESAFE_API_KEY_FILE', 'CAT_CAFE_JEV_PAGE_CONFIG'];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+  try {
+    for (const key of keys) process.env[key] = 'synthetic-api-only-sentinel';
+    const env = buildChildEnv(
+      Object.fromEntries([
+        ...keys.map((key) => [key, 'synthetic-override-sentinel']),
+        ['CAT_CAFE_CALLBACK_TOKEN', 'synthetic-invocation-credential'],
+        ['OPENAI_API_KEY', 'synthetic-selected-account-credential'],
+      ]),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        'console.log(JSON.stringify({jev: ["TYPESAFE_API_KEY","TYPESAFE_API_KEY_FILE","CAT_CAFE_JEV_PAGE_CONFIG"].some(k=>process.env[k]!==undefined), callback:process.env.CAT_CAFE_CALLBACK_TOKEN==="synthetic-invocation-credential", account:process.env.OPENAI_API_KEY==="synthetic-selected-account-credential"}))',
+      ],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), { jev: false, callback: true, account: true });
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('spawnCli applies an explicit environment at the process boundary', async () => {
+  const saved = process.env.F325_AMBIENT_SECRET;
+  process.env.F325_AMBIENT_SECRET = 'fake-runtime-secret';
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const pending = collect(
+      spawnCli(
+        {
+          command: 'agy',
+          args: [],
+          cwd: '/tmp/f325-workspace',
+          inheritParentEnv: false,
+          env: { PATH: '/usr/bin:/bin' },
+        },
+        { spawnFn },
+      ),
+    );
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+    await pending;
+    const childEnv = spawnFn.mock.calls[0].arguments[2].env;
+    assert.equal(childEnv.F325_AMBIENT_SECRET, undefined);
+    assert.equal(childEnv.PATH.includes('/usr/bin:/bin'), true);
+  } finally {
+    if (saved === undefined) delete process.env.F325_AMBIENT_SECRET;
+    else process.env.F325_AMBIENT_SECRET = saved;
+  }
+});
+
 test('buildChildEnv never forwards runtime-only lifecycle capabilities to agent shells', () => {
   const previousConnectorAutostart = process.env.CONNECTOR_GATEWAY_AUTOSTART;
   const previousGlobalSidecarOwner = process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR;
@@ -844,7 +963,7 @@ test(
     assert.equal(childEnv.PATH?.split(':')[0], join(REPO_ROOT, 'scripts', 'guarded-bin'));
     assert.equal(childEnv.CAT_CAFE_VERDICT_GH_GUARD_ROOT, REPO_ROOT);
     assert.equal(childEnv.CAT_CAFE_VERDICT_REPO_FULL_NAME, 'example/cat-cafe');
-    assert.equal(childEnv.ZDOTDIR, join(REPO_ROOT, 'scripts', 'guarded-zsh'));
+    assert.equal(childEnv.ZDOTDIR, join(REPO_ROOT, '.cat-cafe', 'tmp', 'guarded-zsh'));
 
     const loginShell = spawnSync('/bin/zsh', ['-lc', 'command -v gh'], {
       encoding: 'utf8',
@@ -909,6 +1028,39 @@ test(
       else process.env.HISTFILE = previousHistfile;
       if (previousOriginalZdotdir === undefined) delete process.env.CAT_CAFE_ORIGINAL_ZDOTDIR;
       else process.env.CAT_CAFE_ORIGINAL_ZDOTDIR = previousOriginalZdotdir;
+    }
+  },
+);
+
+test(
+  'buildChildEnv keeps shell installer writes out of tracked startup files',
+  { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
+  async () => {
+    const originalZdotdir = await mkdtemp(join(tmpdir(), 'cat-cafe-installer-zdotdir-'));
+    const template = join(REPO_ROOT, 'scripts', 'guarded-zsh', '.zshrc');
+    const original = await readFile(template, 'utf8');
+    let childEnv;
+    try {
+      childEnv = buildChildEnv({ HOME: originalZdotdir, ZDOTDIR: originalZdotdir });
+      const installer = spawnSync(
+        '/bin/zsh',
+        ['-ic', 'printf "\\n# installer configuration\\n" >> "$ZDOTDIR/.zshrc"; : > "$ZDOTDIR/.zcompdump"'],
+        { encoding: 'utf8', env: childEnv },
+      );
+      assert.equal(installer.status, 0, installer.stderr);
+      assert.equal(await readFile(template, 'utf8'), original, 'installer must not dirty the runtime source tree');
+      assert.equal(existsSync(join(REPO_ROOT, 'scripts', 'guarded-zsh', '.zcompdump')), false);
+      assert.match(await readFile(join(childEnv.ZDOTDIR, '.zshrc'), 'utf8'), /installer configuration/);
+
+      const nestedEnv = buildChildEnv(childEnv);
+      assert.equal(nestedEnv.CAT_CAFE_ORIGINAL_ZDOTDIR, originalZdotdir);
+      assert.equal(nestedEnv.HISTFILE, join(originalZdotdir, '.zsh_history'));
+      assert.equal(await readFile(join(nestedEnv.ZDOTDIR, '.zshrc'), 'utf8'), original);
+    } finally {
+      // Also restore the source on RED, when the old implementation points ZDOTDIR at templates.
+      await writeFile(template, original);
+      if (childEnv) await rm(join(childEnv.ZDOTDIR, '.zcompdump'), { force: true });
+      await rm(originalZdotdir, { recursive: true, force: true });
     }
   },
 );

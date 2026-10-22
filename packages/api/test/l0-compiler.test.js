@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -147,6 +147,51 @@ test('F231: L0 cache key isolates users with the same catId', async () => {
   assert.equal(bobSpawn.calls.length, 1, 'bob must not receive alice cache entry');
 });
 
+test('public-safe L0 projection is separately cached and reaches the compiler CLI', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f290-public-l0-cache-'));
+  const ownerSpawn = buildFakeSpawn({ stdout: 'OWNER-L0-WITH-PROFILE' });
+  const publicSpawn = buildFakeSpawn({ stdout: 'PUBLIC-SAFE-L0' });
+
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: ownerSpawn }),
+    'OWNER-L0-WITH-PROFILE',
+  );
+  assert.equal(
+    await compileL0ViaSubprocess({
+      catId: 'codex',
+      userId: 'alice',
+      projection: 'public',
+      cwd: root,
+      dataDir,
+      spawnFn: publicSpawn,
+    }),
+    'PUBLIC-SAFE-L0',
+  );
+  assert.equal(ownerSpawn.calls.length, 1);
+  assert.equal(publicSpawn.calls.length, 1, 'public projection must not reuse the owner-profile cache entry');
+  assert.ok(publicSpawn.calls[0].args.includes('--projection'));
+  assert.equal(publicSpawn.calls[0].args[publicSpawn.calls[0].args.indexOf('--projection') + 1], 'public');
+  assert.equal(publicSpawn.calls[0].args.includes('--profile-dir'), false, 'public compiler receives no profile path');
+  assert.equal(l0CacheSize(), 2, 'owner and public projections keep separate cache entries');
+
+  clearL0Cache('codex', 'alice');
+  const publicRetry = buildFakeSpawn({ stdout: 'PUBLIC-SAFE-L0-AFTER-CLEAR' });
+  assert.equal(
+    await compileL0ViaSubprocess({
+      catId: 'codex',
+      userId: 'alice',
+      projection: 'public',
+      cwd: root,
+      dataDir,
+      spawnFn: publicRetry,
+    }),
+    'PUBLIC-SAFE-L0-AFTER-CLEAR',
+  );
+  assert.equal(publicRetry.calls.length, 1, 'cat+owner invalidation clears every projection');
+});
+
 test('compileL0ViaSubprocess (outPath) passes --out and returns file content', async () => {
   clearL0Cache();
   const root = seedRepoRoot();
@@ -247,12 +292,35 @@ test('compileL0ViaSubprocess invalidates cached L0 when prompt-template assets c
   assert.equal(spawnFn2.calls.length, 1, 'template changes must force a fresh L0 compiler subprocess');
 });
 
+test('compileL0ViaSubprocess invalidates all cached cats when the dossier changes', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dossierPath = join(root, 'docs', 'team', 'cat-dossier.md');
+  mkdirSync(join(root, 'docs', 'team'), { recursive: true });
+  writeFileSync(dossierPath, 'INITIAL DOSSIER');
+  for (const catId of ['dossier-cat-a', 'dossier-cat-b']) {
+    const initial = buildFakeSpawn({ stdout: `BEFORE ${catId}` });
+    await compileL0ViaSubprocess({ catId, cwd: root, spawnFn: initial });
+    await compileL0ViaSubprocess({ catId, cwd: root, spawnFn: initial });
+    assert.equal(initial.calls.length, 1, 'unchanged dossier must keep the cache');
+  }
+  writeFileSync(dossierPath, 'UPDATED DOSSIER ROUTING');
+  for (const catId of ['dossier-cat-a', 'dossier-cat-b']) {
+    const updated = buildFakeSpawn({ stdout: `AFTER ${catId}` });
+    const result = await compileL0ViaSubprocess({ catId, cwd: root, spawnFn: updated });
+    assert.equal(result, `AFTER ${catId}`);
+    assert.equal(updated.calls.length, 1, 'shared dossier change must invalidate every cat');
+  }
+});
+
 test('compileL0ViaSubprocess invalidates cached L0 when governance rules change', async () => {
   clearL0Cache();
   const root = seedRepoRoot();
   const sharedRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md');
   const localRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local.md');
   const overrideRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local-override.md');
+  const fixedTime = new Date('2026-01-01T00:00:00.000Z');
+  utimesSync(sharedRulesPath, fixedTime, fixedTime);
   const spawnFn = buildFakeSpawn({ stdout: 'L0 BEFORE GOVERNANCE CHANGE' });
 
   const out1 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn });
@@ -260,6 +328,8 @@ test('compileL0ViaSubprocess invalidates cached L0 when governance rules change'
   assert.equal(spawnFn.calls.length, 1);
 
   writeFileSync(sharedRulesPath, 'UPDATED GOVERNANCE RULES');
+  // Same-size writes can share a filesystem timestamp; changed content must still invalidate L0.
+  utimesSync(sharedRulesPath, fixedTime, fixedTime);
 
   const spawnFn2 = buildFakeSpawn({ stdout: 'L0 AFTER SHARED RULES CHANGE' });
   const out2 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn: spawnFn2 });
@@ -363,6 +433,47 @@ test('L0 template includes limb tool quick index (via L5 segment)', () => {
     /triage reportingMode=none/,
     'L5 MCP tools template must preserve PR triage reportingMode guidance',
   );
+});
+
+// 2026-09-21 (#4686 review P1/P2): L5 is the ONE tool index for both MCP prompt planes — native L0 §7
+// and the S13 builder segment (loadMcpToolsSection injects this file). Its inventory must never shrink
+// silently: compress explanations, never delete a capability anchor. The set is the union of the
+// pre-dedupe L5 and S13 inventories; extend it when a canonical tool is added, never trim it to fit.
+const REQUIRED_L5_TOOL_NAMES = [
+  'cat_cafe_search_evidence',
+  'cat_cafe_graph_resolve',
+  'cat_cafe_list_recent',
+  'cat_cafe_library_*',
+  'cat_cafe_post_message',
+  'cat_cafe_cross_post_message',
+  'cat_cafe_multi_mention',
+  'cat_cafe_hold_ball',
+  'cat_cafe_get_thread_context',
+  'cat_cafe_list_threads',
+  'cat_cafe_get_pending_mentions',
+  'cat_cafe_propose_thread',
+  'cat_cafe_withdraw_thread_proposal',
+  'cat_cafe_create_task',
+  'cat_cafe_update_task',
+  'cat_cafe_list_tasks',
+  'cat_cafe_create_rich_block',
+  'cat_cafe_get_rich_block_rules',
+  'cat_cafe_generate_document',
+  'cat_cafe_list_session_chain',
+  'cat_cafe_read_session_digest',
+  'cat_cafe_read_session_events',
+  'cat_cafe_read_invocation_detail',
+  'limb_list_available',
+  'limb_list_tools',
+  'limb_invoke_tool',
+  'tool_search',
+];
+
+test('L5 tool index keeps every canonical tool name (inventory guard, #4686)', () => {
+  const l5Path = resolve(import.meta.dirname, '../../../assets/prompt-templates/l5-mcp-tools-index.md');
+  const content = readFileSync(l5Path, 'utf8');
+  const missing = REQUIRED_L5_TOOL_NAMES.filter((name) => !content.includes(name));
+  assert.deepEqual(missing, [], `L5 dropped canonical tool names: ${missing.join(', ')}`);
 });
 
 // --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---

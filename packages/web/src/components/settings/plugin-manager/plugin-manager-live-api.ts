@@ -6,6 +6,7 @@ import type {
   PluginManagerListItem,
   PluginManagerListResponse,
 } from '@cat-cafe/shared';
+import { CHATGPT_CLOUD_ENTRY_LABEL } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
 import type { PluginManagerDesignFixture, PluginManagerReadmeState } from './plugin-manager-fixtures';
 
@@ -43,8 +44,12 @@ function fixtureDetail(detail: ConsolePluginManagerDetail | undefined): Partial<
         }),
     readme: detail.readme,
     ...(detail.setupSteps === undefined ? {} : { setupSteps: detail.setupSteps }),
+    ...(detail.permissions === undefined ? {} : { permissions: detail.permissions }),
+    ...(detail.steps === undefined ? {} : { steps: detail.steps }),
+    ...(detail.testable === undefined ? {} : { testable: detail.testable }),
     ...(detail.docsUrl === undefined ? {} : { docsUrl: detail.docsUrl }),
     ...(detail.configFields === undefined ? {} : { configFields: detail.configFields }),
+    ...(detail.bindings === undefined ? {} : { bindings: detail.bindings }),
   };
 }
 
@@ -56,15 +61,38 @@ export function designFixture(
   const capabilities = detail?.capabilities ?? plugin.capabilitySummary;
   return {
     id: plugin.pluginId,
-    displayName: plugin.displayName,
+    // The current built-in surface is distinct from the immutable installed release name.
+    displayName: plugin.pluginId === 'official.chatgpt-dot' ? CHATGPT_CLOUD_ENTRY_LABEL : plugin.displayName,
     description: plugin.description ?? plugin.displayName,
     icon: plugin.icon ?? 'blocks',
     ...(plugin.iconBg === undefined ? {} : { iconBg: plugin.iconBg }),
-    publisher: plugin.publisher ?? (plugin.source.trust === 'official' ? 'Clowder AI' : 'Local Host'),
+    publisher:
+      plugin.publisher ??
+      (plugin.source.kind === 'unknown'
+        ? '发布者未记录'
+        : plugin.source.trust === 'official'
+          ? 'Clowder AI'
+          : 'Local Host'),
     packageName: packageName(plugin),
-    source: plugin.source.kind === 'catalog' ? 'catalog' : 'local',
-    trust: plugin.source.trust === 'official' ? 'official' : 'local-trusted',
-    ...(plugin.source.kind === 'compatibility' ? { sourceAdapter: plugin.source.adapter } : {}),
+    source:
+      plugin.source.kind === 'unknown'
+        ? 'unknown'
+        : plugin.source.kind === 'catalog' || (plugin.source.kind === 'git' && plugin.source.marketplace)
+          ? 'catalog'
+          : 'local',
+    trust: plugin.source.trust,
+    ...(plugin.source.kind === 'git'
+      ? {
+          repositoryName:
+            plugin.source.url
+              .replace(/\.git$/, '')
+              .split(/[/:]/)
+              .at(-1) || '插件仓库',
+        }
+      : {}),
+    ...('dependencyClosure' in plugin.source && plugin.source.dependencyClosure !== undefined
+      ? { dependencyClosure: plugin.source.dependencyClosure }
+      : {}),
     availableVersion: plugin.availableVersion ?? plugin.installedVersion ?? 'unknown',
     installedVersion: plugin.installedVersion,
     artifact: plugin.artifact,
@@ -72,6 +100,7 @@ export function designFixture(
     auth: plugin.auth,
     intent: plugin.intent,
     live: plugin.live,
+    ...(plugin.activationFailed === undefined ? {} : { activationFailed: plugin.activationFailed }),
     readme,
     capabilities: capabilities.map((capability) => ({
       name: capability.name,
@@ -156,7 +185,7 @@ export async function fetchManagerDetail(
   const path = `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}`;
   const [response, documentation] = await Promise.all([
     afterMutation ? apiFetch(path, undefined, { afterCurrentGet: true }) : apiFetch(path),
-    fetchDocumentation(path),
+    pluginId === 'official.chatgpt-dot' ? Promise.resolve({ state: 'absent' } as const) : fetchDocumentation(path),
   ]);
   if (!response.ok) throw new Error(`detail request failed (${response.status})`);
   const value: unknown = await response.json();
@@ -183,31 +212,12 @@ export async function fetchManagerList(search: string, afterMutation: boolean): 
   return value;
 }
 
-function legacyConfigurationUpdates(updates: readonly ConfigurationUpdate[]) {
-  return updates.map(({ key, value }) => ({ name: key, value }));
-}
-
 export function configurationRequest(
   plugin: PluginManagerListItem | undefined,
   updates: readonly ConfigurationUpdate[],
 ): { readonly path: string; readonly init: RequestInit } | undefined {
   if (!plugin || plugin.artifact !== 'installed') return undefined;
   const encodedId = encodeURIComponent(plugin.pluginId);
-  if (plugin.source.kind === 'compatibility') {
-    const repositoryLocal = plugin.source.adapter === 'repository-local';
-    return {
-      path: repositoryLocal ? `/api/plugins/${encodedId}/config` : `/api/connectors/${encodedId}/config`,
-      init: {
-        method: repositoryLocal ? 'POST' : 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(
-          repositoryLocal
-            ? { updates: legacyConfigurationUpdates(updates) }
-            : { fields: legacyConfigurationUpdates(updates) },
-        ),
-      },
-    };
-  }
   if (plugin.lifecycleRevision === null) return undefined;
   return {
     path: `/api/plugin-manager/plugins/${encodedId}/contributions/configuration`,

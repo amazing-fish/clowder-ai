@@ -5,7 +5,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -157,7 +157,8 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
     });
     assert.ok(prompt.includes('cat_cafe_post_message'));
-    assert.ok(prompt.includes('cat_cafe_register_pr_tracking'));
+    assert.ok(prompt.includes('已安装的 GitHub 插件'));
+    assert.equal(prompt.includes('cat_cafe_register_pr_tracking'), false); // mcp-cutover-negative-reference: absence
     assert.ok(prompt.includes('cat_cafe_get_pending_mentions'));
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });
@@ -417,7 +418,7 @@ describe('SystemPromptBuilder', () => {
 
   // --- Phase 3.6: honesty rule ---
 
-  test('contains "不确定" honesty rule', async () => {
+  test('requires evidence for conclusions and honest incomplete status', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -425,7 +426,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('不确定'), 'Prompt should tell cats to say "I\'m not sure"');
+    assert.ok(prompt.includes('结论必须基于多源证据'), 'Prompt should require evidence before conclusions');
+    assert.ok(prompt.includes('没查完就说还没查完'), 'Prompt should disclose an incomplete investigation');
   });
 
   test('contains "不要编造" anti-fabrication rule', async () => {
@@ -462,7 +464,8 @@ describe('SystemPromptBuilder', () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const opusId = buildStaticIdentity('opus');
     assert.ok(opusId.includes('工作流'), 'Opus should have workflow triggers');
-    assert.ok(opusId.includes('@缅因猫'), 'Opus workflow should mention review with 缅因猫');
+    assert.ok(opusId.includes('先判断要不要独立 review'));
+    assert.ok(opusId.includes('只找一只非作者的常规 reviewer'));
     assert.ok(
       opusId.includes('MG provenance override'),
       'Opus workflow should avoid local-reviewer ping after external merge-gate feedback',
@@ -470,12 +473,13 @@ describe('SystemPromptBuilder', () => {
 
     const codexId = buildStaticIdentity('codex');
     assert.ok(codexId.includes('工作流'), 'Codex should have workflow triggers');
-    assert.ok(codexId.includes('@布偶猫'), 'Codex workflow should mention notifying 布偶猫');
+    assert.ok(codexId.includes('完成 review → @作者'), 'Codex workflow should notify the author');
+    assert.ok(codexId.includes('### 执行纪律'));
+    assert.ok(codexId.includes('出口一问'));
     assert.ok(
       codexId.includes('MG provenance override'),
       'Codex workflow should avoid local-reviewer ping after external merge-gate feedback',
     );
-    assert.ok(codexId.includes('出口一问'), 'Codex workflow should include exit check (出口一问)');
 
     const opencodeId = buildStaticIdentity('opencode');
     assert.ok(opencodeId.includes('工作流'), 'OpenCode should have workflow triggers');
@@ -486,6 +490,10 @@ describe('SystemPromptBuilder', () => {
     assert.ok(opencodeId.includes('### 执行纪律'), 'OpenCode workflow should include execution discipline');
     assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
     assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
+    for (const prompt of [opusId, codexId, opencodeId, buildStaticIdentity('gemini25')]) {
+      assert.match(prompt, /常规 reviewer（缅因猫、kimi 或 gemini-argon；Argon 只审不写）/);
+      assert.doesNotMatch(prompt, /常规 reviewer（[^）]*Sonnet/);
+    }
   });
 
   test('buildStaticIdentity is deterministic', async () => {
@@ -819,7 +827,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('terminal Release'));
     assert.ok(ctx.includes('不要发送“收到/谢谢” ACK'));
     assert.ok(ctx.includes('继续原任务'));
-    assert.ok(ctx.includes('无需 @co-creator'));
+    const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+    assert.ok(ctx.includes(`无需 ${getCoCreatorConfig().mentionPatterns[0]}`));
     assert.ok(!ctx.includes('回复请用 cross_post_message'));
   });
 
@@ -1309,38 +1318,7 @@ describe('SystemPromptBuilder', () => {
     );
   });
 
-  // F032 Phase D2: Reviewer section tests
-  test('buildReviewerSection returns reviewer list for opus (different family reviewers)', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('opus');
-    assert.ok(section, 'Should return section for opus');
-    assert.ok(section.includes('## 你当前的 Reviewers'), 'Should have reviewer header');
-    assert.ok(section.includes('@codex'), 'Should list codex as reviewer (different family)');
-    // Should NOT list same-family cats (opus-45 is ragdoll, same as opus)
-    assert.ok(!section.includes('@opus-45'), 'Should not list same-family opus-45');
-  });
-
-  test('buildReviewerSection returns null for unknown cat', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('unknown-cat');
-    assert.equal(section, null, 'Should return null for unknown cat');
-  });
-
-  // Cloud Codex R5 P2: Verify same-family fallback behavior is documented
-  // When requireDifferentFamily is enabled but no cross-family reviewers are available,
-  // same-family reviewers should be shown with a fallback note.
-  // This test verifies the cross-family-available case works correctly;
-  // the fallback case requires mocking roster/availability (out of scope for unit test).
-  test('buildReviewerSection shows cross-family when available (R5 P2 prerequisite)', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('opus');
-    assert.ok(section, 'Should return section');
-    // Cross-family available, so should NOT show fallback note
-    assert.ok(!section.includes('fallback'), 'Should not show fallback note when cross-family available');
-    assert.ok(section.includes('@codex'), 'Should show cross-family reviewer');
-  });
-
-  test('buildSystemPrompt includes reviewer section', async () => {
+  test('buildSystemPrompt does not inject legacy reviewer recommendations', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1348,7 +1326,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: true,
     });
-    assert.ok(prompt.includes('## 你当前的 Reviewers'), 'System prompt should include reviewer section');
+    assert.ok(!prompt.includes('## 你当前的 Reviewers'), 'Reviewer choice belongs to risk routing and dossier');
   });
 
   // --- F042 Wave 3: Active participant hint tests ---
@@ -1367,8 +1345,8 @@ describe('SystemPromptBuilder', () => {
         { catId: 'codex', lastMessageAt: 1000, messageCount: 3 },
       ],
     });
-    assert.match(ctx, /最近活跃：布偶猫\(opus\)\n|最近活跃：布偶猫\(opus\)$/, 'Should inject displayName(id) format');
-    assert.ok(!ctx.includes('最近活跃：缅因猫(codex)'), 'Self (codex) should not appear as most recently active');
+    assert.match(ctx, /最近发言：布偶猫\(opus\)\n|最近发言：布偶猫\(opus\)$/, 'Should inject displayName(id) format');
+    assert.ok(!ctx.includes('最近发言：缅因猫(codex)'), 'Self (codex) should not appear as most recent speaker');
   });
 
   test('buildInvocationContext skips self in activity list', async () => {
@@ -1386,7 +1364,7 @@ describe('SystemPromptBuilder', () => {
       ],
     });
     // opus is self and most-recent, should be skipped; codex is next
-    assert.match(ctx, /最近活跃：缅因猫\(codex\)\n|最近活跃：缅因猫\(codex\)$/, 'Should inject displayName(id) format');
+    assert.match(ctx, /最近发言：缅因猫\(codex\)\n|最近发言：缅因猫\(codex\)$/, 'Should inject displayName(id) format');
   });
 
   test('buildInvocationContext omits hint when activeParticipants absent', async () => {
@@ -1397,7 +1375,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no activeParticipants');
+    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no activeParticipants');
   });
 
   test('buildInvocationContext omits hint when only self has activity', async () => {
@@ -1414,7 +1392,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'codex', lastMessageAt: 0, messageCount: 0 },
       ],
     });
-    assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
+    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no non-self participant has activity');
   });
 
   test('buildSystemPrompt size with activeParticipants stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
@@ -1950,9 +1928,20 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Bootcamp Mode'), 'Should not include bootcamp header');
   });
 
+  test('maine-coon prompt uses risk-based review and a separate creative draft', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex');
+    assert.ok(prompt.includes('先判断要不要独立 review'));
+    assert.ok(prompt.includes('一只非作者的常规 reviewer'));
+    assert.ok(prompt.includes('动手前先请「创作位」出稿'));
+    assert.ok(prompt.includes('做完不再请他逐轮复审'));
+    assert.ok(prompt.includes('写进 feature doc 或 Task，不叫醒 owner'));
+    assert.ok(!prompt.includes('修完 bug/feature → @布偶猫 请 review'));
+  });
+
   // --- 回归测试：maine-coon prompt 必须包含 A2A 执行纪律 ---
 
-  test('maine-coon prompt contains execution discipline keywords', async () => {
+  test('maine-coon prompt keeps execution discipline without blanket silence', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'codex',
@@ -1960,19 +1949,29 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('静默执行'), 'maine-coon prompt must include 静默执行');
-    assert.ok(prompt.includes('声明'), 'maine-coon prompt must include 声明 ≠ 执行');
+    assert.ok(!prompt.includes('静默执行'), 'work must not suppress human-facing progress');
+    assert.ok(prompt.includes('声明 = 执行'), 'progress statements must still be backed by action');
     // F064 球权模型: 空气传球 警告并入 "A2A 球权检查" invocation context（矛盾 push back 语义）
     assert.ok(prompt.includes('push back'), 'maine-coon prompt must include push back (phantom handoff guard)');
     assert.ok(prompt.includes('出口一问'), 'maine-coon prompt must include 出口一问');
   });
 
-  test('maine-coon workflow contains A2A state transition keywords', async () => {
+  test('maine-coon prompt separates A2A routing from human-facing progress', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const codexId = buildStaticIdentity('codex');
-    assert.ok(codexId.includes('BLOCKED'), 'codex prompt must include BLOCKED state');
-    assert.ok(codexId.includes('REVIEW READY'), 'codex prompt must include REVIEW READY state');
-    assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
+    assert.ok(codexId.includes('跨猫路由只在需要对方行动或状态迁移时发送'));
+    const sourceRules = readFileSync(
+      resolve(dirname(CAT_TEMPLATE_PATH), 'cat-cafe-skills/refs/shared-rules.md'),
+      'utf8',
+    );
+    const progressBoundary = sourceRules.match(/人或队友发起任务，进度都对人可见/)?.[0];
+    assert.ok(progressBoundary, 'the source must declare the human progress boundary');
+    assert.ok(codexId.includes(progressBoundary));
+    assert.ok(codexId.includes('先用本轮正文说明要做什么，再调用工具'));
+    assert.ok(codexId.includes('工作中更新关键发现、阻碍与下一步'));
+    assert.ok(codexId.includes('进度说明无需 @ 或唤醒队友'));
+    assert.ok(!codexId.includes('只发状态迁移消息'));
+    assert.ok(codexId.includes('serial/handoff 场景且需要对方行动 → @ 对应猫'));
   });
 
   // ─── F129 Pack Block Injection ──────────────────────────────────────
@@ -2101,8 +2100,8 @@ describe('SystemPromptBuilder', () => {
     const magicWordPattern = /\|.*?「(.+?)」/g;
     const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
     assert.ok(
-      rulesMagicWords.length >= 7,
-      `Expected >=7 magic words in shared-rules.md, got ${rulesMagicWords.length}`,
+      rulesMagicWords.length === 6,
+      `Expected six current magic-word definitions in shared-rules.md, got ${rulesMagicWords.length}`,
     );
     const build = await getBuilder();
     const prompt = build({

@@ -1,8 +1,10 @@
 'use client';
 
 import { type CloudBridgeOutboundReceiptV1, isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 import { getCachedCats } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { CloudDotReceipt } from './CloudDotReceipt';
 import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
 import { ReplyPill } from './ReplyPill';
@@ -33,6 +35,7 @@ function NoticeIcon({ icon }: { icon?: string }) {
 
 interface SystemNoticeBarProps {
   message: ChatMessageType;
+  footer?: ReactNode;
 }
 
 const RECEIPT_STATUS_LABEL: Record<CloudBridgeOutboundReceiptV1['status'], string> = {
@@ -79,7 +82,7 @@ function CloudOutboundAudit({ message, receipt }: { message: ChatMessageType; re
   );
 }
 
-export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
+export function SystemNoticeBar({ message, footer }: SystemNoticeBarProps) {
   const source = message.source;
   if (!source) return null;
 
@@ -104,10 +107,15 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
             </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
-              {outboundReceipt && <CloudOutboundAudit message={message} receipt={outboundReceipt} />}
+              {outboundReceipt?.targetCatId === 'gpt-dot' ? (
+                <CloudDotReceipt eventId={outboundReceipt.hostMessageId} />
+              ) : (
+                outboundReceipt && <CloudOutboundAudit message={message} receipt={outboundReceipt} />
+              )}
             </div>
           </div>
         </div>
+        {footer}
       </div>
     </div>
   );

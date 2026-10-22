@@ -5,6 +5,10 @@
 @import "./exploration-actions.css";
 @import "./exploration-conditions.css";
 @import "./exploration-host.css";
+@import "./exploration-navigation.css";
+@import "./exploration-decision.css";
+@import "./exploration-v2.css";
+@import "./exploration-history.css";
 
 .exploration-workspace {
   min-width: 0;
@@ -138,7 +142,7 @@
 }
 .exploration-navigation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 24px;
   padding: 18px;
@@ -151,8 +155,8 @@
   min-width: 0;
 }
 .exploration-selected {
-  padding-left: 22px;
-  border-left: 1px solid var(--cafe-border-subtle);
+  padding-top: 18px;
+  border-top: 1px solid var(--cafe-border-subtle);
 }
 .exploration-changes {
   margin: 8px 0 14px;
@@ -160,13 +164,17 @@
 }
 .exploration-changes summary {
   cursor: pointer;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+  color: var(--evolution-focus-text);
 }
-.exploration-changes[open] summary {
-  -webkit-line-clamp: unset;
+.exploration-version-summary {
+  margin-block: 10px;
+  max-width: 76em;
+  overflow-wrap: anywhere;
+}
+.exploration-experiment-caption {
+  margin: 8px 0 0;
+  color: var(--cafe-text-secondary);
+  overflow-wrap: anywhere;
 }
 .exploration-changes p {
   margin-top: 10px;
@@ -215,6 +223,21 @@
 }
 .exploration-link {
   margin: 8px 12px 0 0;
+}
+.exploration-history-recovery {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--semantic-info);
+  border-radius: 0 6px 6px 0;
+  background: var(--semantic-info-surface);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.exploration-history-recovery strong {
+  color: var(--cafe-text);
+}
+.exploration-history-recovery p {
+  margin: 6px 0 0;
 }
 .exploration-notice {
   margin: 12px 0;

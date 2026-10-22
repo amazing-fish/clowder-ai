@@ -7,9 +7,12 @@
 import type {
   AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
+  CatRoutingError,
   ConnectorSource,
   CrossThreadCoordination,
+  LifecycleStoredMessageMetadata,
   MessageContent,
+  MessageFrom,
   RichMessageExtra,
   WriteOpportunityPresentationRetryCarrierV1,
   WriteOpportunityReentryCarrierV1,
@@ -18,33 +21,48 @@ import {
   acceptedRevisionSchema,
   acceptedSourceRefSchema,
   asrPersonMemoryDynamicSceneEntryV1Schema,
+  CatRoutingErrorSchema,
   catOwnedSeedCueCarrierV1Schema,
-  collectiveOwnerAdmissionV1Schema,
-  collectiveWorkInvocationV1Schema,
+  companionIdentitySnapshotV1Schema,
+  contentModificationReceiptV1Schema,
+  contentModificationSourceMessageV1Schema,
+  createCatId,
   deliveryDecisionCueCarrierV1Schema,
+  dotAskMetadataSchema,
+  entrustedWorkHumanTerminalReceiptV1Schema,
   evolutionPreparationSubmissionV1Schema,
+  evolutionUseSourceV1Schema,
+  isCloudBridgeRetryV1,
+  isLifecycleStoredMessageMetadata,
+  isMessageFrom,
   isProviderSemanticEvent,
   isValidAcceptedSource,
   isValidReviewSubjectRef,
   localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  readMessageOutputLayout,
   routingPreflightReceiptV1Schema,
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import { MAX_PERSISTED_SUBEXECUTION_EVENTS, type MessageMetadata } from '../../types.js';
+import { liveResultNoticeSchema, liveReturnProjectionSchema } from '../live-result-carriers.js';
 import { parseMessageDeliveryBoundary } from '../message-delivery-boundary.js';
-import type {
-  MessageRecallMarker,
-  StoredMessage,
-  StoredPluginMessage,
-  StoredToolEvent,
-} from '../ports/MessageStore.js';
-import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
+import { MessageRecallMarker, StoredMessage, StoredPluginMessage, StoredToolEvent } from '../ports/MessageStore.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
+
+export function safeParseMessageFrom(raw: string | undefined | null): MessageFrom | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isMessageFrom(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
   return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
@@ -90,8 +108,53 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   }
 }
 
-export const safeParseQueueCustody = parseQueuedMessageCustody;
-export const safeParseQueueCustodyAdmission = parseQueueCustodyAdmissionIntent;
+export function safeParseLifecycleMetadata(raw: string | undefined): LifecycleStoredMessageMetadata | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const lifecycle = parsed as Record<string, unknown>;
+      if (Array.isArray(lifecycle.dispatchRefs)) {
+        // v1 wrote routing intent as `assigned`; that was never proof of
+        // delivery. Drop it while preserving actual dispatched/settled refs.
+        lifecycle.dispatchRefs = lifecycle.dispatchRefs.flatMap((value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return [value];
+          const ref = value as Record<string, unknown>;
+          if (ref.phase === 'assigned') return [];
+          if (
+            (ref.phase === 'dispatched' || ref.phase === 'settled') &&
+            typeof ref.targetId === 'string' &&
+            typeof ref.statusMessageId === 'string'
+          ) {
+            const canonical = { ...ref };
+            if (typeof canonical.dispatchedAt !== 'number' || !Number.isFinite(canonical.dispatchedAt)) {
+              delete canonical.dispatchedAt;
+            }
+            return [canonical];
+          }
+          return [value];
+        });
+      }
+    }
+    if (!isLifecycleStoredMessageMetadata(parsed)) return undefined;
+    const { from: _legacyFrom, ...canonical } = parsed as LifecycleStoredMessageMetadata & { from?: unknown };
+    void _legacyFrom;
+    return canonical as LifecycleStoredMessageMetadata;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Lift the pre-realignment lifecycle identity into StoredMessage.from once. */
+export function safeParseLegacyLifecycleMessageFrom(raw: string | undefined): MessageFrom | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { from?: unknown };
+    return isMessageFrom(parsed.from) ? parsed.from : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
   if (!raw) return undefined;
@@ -161,7 +224,7 @@ function parseTurnExecutionProjection(value: unknown): TurnExecutionMessageProje
     candidate.invocationId.length === 0 ||
     typeof candidate.parentInvocationId !== 'string' ||
     candidate.parentInvocationId.length === 0 ||
-    !['ordinary', 'routing_guard', 'freshness_supplement'].includes(String(candidate.executionKind))
+    !['ordinary', 'routing_guard'].includes(String(candidate.executionKind))
   ) {
     return undefined;
   }
@@ -185,15 +248,25 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
-  collectiveOwnerAdmissionV1: 'parsed';
-  collectiveWorkInvocationV1: 'parsed';
-  collectiveAuthorizationInvalid: 'derived';
+  outputLayout: 'parsed';
+  a2aFailureReturn: 'parsed';
+  coveredA2AFailureReturns: 'parsed';
+  contentModificationRequestV1: 'parsed';
+  contentModificationReceiptV1: 'parsed';
   semanticEvent: 'parsed';
+  runtimeInteractionReturn: 'parsed';
+  runtimeInteractionCard: 'parsed';
   realtimeCompanion: 'parsed';
+  liveCompanion: 'parsed';
+  liveAdmission: 'parsed';
+  routingTargetSource: 'parsed';
   rich: 'parsed';
+  callbackRichRequestDigest: 'parsed';
   isExplicitPost: 'parsed';
+  mediaPublication: 'parsed';
   stream: 'parsed';
   causal: 'parsed';
+  dotAsk: 'parsed';
   deliveryBoundary: 'parsed';
   proactive: 'parsed';
   memoryCue: 'parsed';
@@ -204,6 +277,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   localReviewVerdict: 'parsed';
   callbackDedup: 'parsed';
   targetCats: 'parsed';
+  notificationDelivery: 'parsed';
   messageBundle: 'parsed';
   meetingArtifact: 'parsed';
   dynamicSceneEntries: 'parsed';
@@ -211,21 +285,72 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   writeOpportunityReentries: 'parsed';
   writeOpportunityPresentationRetry: 'parsed';
   freshness: 'parsed';
-  supplement: 'parsed';
   recovery: 'parsed';
   scheduler: 'parsed';
   tracing: 'parsed';
   systemKind: 'parsed';
   systemInfo: 'parsed';
   a2aRouting: 'parsed';
-  queueReceipt: 'derived';
-  pluginMessage: 'parsed';
   custodyOfferV1: 'derived';
+  entrustedWorkHumanTerminalReceiptV1: 'parsed';
   evolutionPreparationSubmissionV1: 'parsed';
+  evolutionUseSourceV1: 'parsed';
+  pluginMessage: 'parsed';
+  routingWarnings: 'parsed';
+  cloudBridgeRetry: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function parseCoveredA2AFailureReturn(
+  value: unknown,
+): NonNullable<StoredMessageExtra['coveredA2AFailureReturns']>[number] | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const receipt = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(receipt.triggerMessageId) ||
+    !isNonEmptyString(receipt.callerCatId) ||
+    typeof receipt.isFailureReport !== 'boolean' ||
+    (receipt.ownerAuthProvenance !== 'strict' &&
+      receipt.ownerAuthProvenance !== 'compatibility_fallback' &&
+      receipt.ownerAuthProvenance !== 'unknown')
+  )
+    return undefined;
+  return {
+    triggerMessageId: receipt.triggerMessageId,
+    callerCatId: receipt.callerCatId,
+    isFailureReport: receipt.isFailureReport,
+    ownerAuthProvenance: receipt.ownerAuthProvenance,
+  };
+}
+
+function parseA2AFailureReturn(value: unknown): StoredMessageExtra['a2aFailureReturn'] {
+  const common = parseCoveredA2AFailureReturn(value);
+  if (
+    !common ||
+    typeof value !== 'object' ||
+    value === null ||
+    !('parentInvocationId' in value) ||
+    !isNonEmptyString(value.parentInvocationId)
+  )
+    return undefined;
+  return { ...common, parentInvocationId: value.parentInvocationId };
+}
+
+function parseRealtimeCompanionCarrier(value: unknown): StoredMessageExtra['realtimeCompanion'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    (candidate.consumer !== 'watch_video' && candidate.consumer !== 'meeting_companion') ||
+    !isNonEmptyString(candidate.invocationId) ||
+    candidate.invocationId.length > 128 ||
+    !/^realtime-companion-[0-9a-f-]+$/.test(candidate.invocationId)
+  ) {
+    return undefined;
+  }
+  return { consumer: candidate.consumer, invocationId: candidate.invocationId };
 }
 
 function isOptionalLocalReviewHead(value: unknown): boolean {
@@ -284,20 +409,50 @@ function parseProactiveCarrier(value: unknown): StoredMessageExtra['proactive'] 
   return { visitId: candidate.visitId, intentId: candidate.intentId, source: 'private_time' };
 }
 
-function parseRealtimeCompanionCarrier(value: unknown): StoredMessageExtra['realtimeCompanion'] {
+function parseLiveCompanionCarrier(value: unknown): StoredMessageExtra['liveCompanion'] {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
-  if (
-    (candidate.consumer !== 'watch_video' && candidate.consumer !== 'meeting_companion') ||
-    !isNonEmptyString(candidate.invocationId) ||
-    candidate.invocationId.length > 128 ||
-    !/^realtime-companion-[0-9a-f-]+$/.test(candidate.invocationId)
-  ) {
-    return undefined;
+  const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(id);
+  const identity = companionIdentitySnapshotV1Schema.safeParse(candidate.identity);
+  const projection = liveReturnProjectionSchema.safeParse(candidate.returnProjection);
+  if (candidate.modality === 'typed') {
+    if (
+      !validId(candidate.callId) ||
+      candidate.role !== 'user' ||
+      !isNonEmptyString(candidate.clientMessageId) ||
+      candidate.clientMessageId.length > 256
+    )
+      return undefined;
+    return {
+      callId: candidate.callId,
+      modality: 'typed',
+      role: 'user',
+      clientMessageId: candidate.clientMessageId,
+      ...(identity.success ? { identity: identity.data } : {}),
+    };
   }
-  return { consumer: candidate.consumer, invocationId: candidate.invocationId };
+  if (
+    (candidate.modality !== 'voice' && candidate.modality !== 'result') ||
+    !validId(candidate.callId) ||
+    !validId(candidate.nativeThreadId) ||
+    !validId(candidate.realtimeSessionId) ||
+    !validId(candidate.nativeItemId) ||
+    (candidate.modality === 'result' && !validId(candidate.nativeTurnId)) ||
+    (candidate.modality === 'voice' && candidate.nativeTurnId !== undefined)
+  )
+    return undefined;
+  return {
+    callId: candidate.callId,
+    nativeThreadId: candidate.nativeThreadId,
+    realtimeSessionId: candidate.realtimeSessionId,
+    nativeItemId: candidate.nativeItemId,
+    modality: candidate.modality,
+    ...(candidate.role === 'user' || candidate.role === 'assistant' ? { role: candidate.role } : {}),
+    ...(candidate.modality === 'result' ? { nativeTurnId: candidate.nativeTurnId as string } : {}),
+    ...(candidate.modality === 'result' && projection.success ? { returnProjection: projection.data } : {}),
+    ...(identity.success ? { identity: identity.data } : {}),
+  };
 }
-
 function parseMeetingArtifactCarrier(value: unknown): StoredMessageExtra['meetingArtifact'] {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -350,26 +505,80 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     if (typeof parsed !== 'object' || parsed === null) return undefined;
 
     const result: StoredMessageExtra = {};
-    let hasField = false;
-    if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
-      const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
-      if (admission.success) result.collectiveOwnerAdmissionV1 = admission.data;
-      else result.collectiveAuthorizationInvalid = true;
+    const modification = contentModificationSourceMessageV1Schema.safeParse(parsed.contentModificationRequestV1);
+    if (modification.success) result.contentModificationRequestV1 = modification.data;
+    const modificationReceipt = contentModificationReceiptV1Schema.safeParse(parsed.contentModificationReceiptV1);
+    if (modificationReceipt.success) result.contentModificationReceiptV1 = modificationReceipt.data;
+    const outputLayout = readMessageOutputLayout(parsed.outputLayout);
+    if (outputLayout) result.outputLayout = outputLayout;
+    let hasField = modification.success || modificationReceipt.success || outputLayout !== undefined;
+    const failureReturn = parseA2AFailureReturn(parsed.a2aFailureReturn);
+    if (failureReturn) {
+      result.a2aFailureReturn = failureReturn;
       hasField = true;
     }
-    if (parsed.collectiveWorkInvocationV1 !== undefined) {
-      const invocation = collectiveWorkInvocationV1Schema.safeParse(parsed.collectiveWorkInvocationV1);
-      if (invocation.success) result.collectiveWorkInvocationV1 = invocation.data;
-      else result.collectiveAuthorizationInvalid = true;
-      hasField = true;
+    if (Array.isArray(parsed.coveredA2AFailureReturns)) {
+      const receipts: (NonNullable<StoredMessageExtra['coveredA2AFailureReturns']>[number] | undefined)[] =
+        parsed.coveredA2AFailureReturns.map(parseCoveredA2AFailureReturn);
+      if (receipts.every((receipt): receipt is NonNullable<typeof receipt> => receipt !== undefined)) {
+        result.coveredA2AFailureReturns = receipts;
+        hasField = true;
+      }
     }
-    if (parsed.collectiveAuthorizationInvalid === true) {
-      result.collectiveAuthorizationInvalid = true;
+    const entrustedWorkTerminalReceipt = entrustedWorkHumanTerminalReceiptV1Schema.safeParse(
+      parsed.entrustedWorkHumanTerminalReceiptV1,
+    );
+    if (entrustedWorkTerminalReceipt.success) {
+      result.entrustedWorkHumanTerminalReceiptV1 = entrustedWorkTerminalReceipt.data;
       hasField = true;
     }
 
     if (isProviderSemanticEvent(parsed.semanticEvent)) {
       result.semanticEvent = parsed.semanticEvent;
+      hasField = true;
+    }
+
+    const runtimeReturn = parsed.runtimeInteractionReturn;
+    if (
+      runtimeReturn &&
+      typeof runtimeReturn === 'object' &&
+      typeof runtimeReturn.interactionId === 'string' &&
+      runtimeReturn.interactionId.length > 0 &&
+      typeof runtimeReturn.operationId === 'string' &&
+      runtimeReturn.operationId.length > 0 &&
+      (runtimeReturn.author === 'owner' || runtimeReturn.author === 'host') &&
+      typeof runtimeReturn.requesterCatId === 'string' &&
+      runtimeReturn.requesterCatId.length > 0 &&
+      typeof runtimeReturn.cardMessageId === 'string' &&
+      runtimeReturn.cardMessageId.length > 0
+    ) {
+      result.runtimeInteractionReturn = {
+        interactionId: runtimeReturn.interactionId,
+        operationId: runtimeReturn.operationId,
+        author: runtimeReturn.author,
+        requesterCatId: runtimeReturn.requesterCatId as CatId,
+        cardMessageId: runtimeReturn.cardMessageId,
+      };
+      hasField = true;
+    }
+
+    const runtimeCard = parsed.runtimeInteractionCard;
+    if (
+      runtimeCard &&
+      typeof runtimeCard === 'object' &&
+      runtimeCard.version === 1 &&
+      typeof runtimeCard.interactionId === 'string' &&
+      runtimeCard.interactionId.length > 0 &&
+      typeof runtimeCard.blockId === 'string' &&
+      runtimeCard.blockId.length > 0 &&
+      ['approval', 'question', 'elicitation', 'conversation_decision'].includes(String(runtimeCard.requestKind))
+    ) {
+      result.runtimeInteractionCard = {
+        version: 1,
+        interactionId: runtimeCard.interactionId,
+        blockId: runtimeCard.blockId,
+        requestKind: runtimeCard.requestKind as 'approval' | 'question' | 'elicitation' | 'conversation_decision',
+      };
       hasField = true;
     }
 
@@ -380,10 +589,36 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       result.evolutionPreparationSubmissionV1 = evolutionPreparationSubmission.data;
       hasField = true;
     }
+    const evolutionUseSource = evolutionUseSourceV1Schema.safeParse(parsed.evolutionUseSourceV1);
+    if (evolutionUseSource.success) {
+      result.evolutionUseSourceV1 = evolutionUseSource.data;
+      hasField = true;
+    }
 
     const realtimeCompanion = parseRealtimeCompanionCarrier(parsed.realtimeCompanion);
     if (realtimeCompanion) {
       result.realtimeCompanion = realtimeCompanion;
+      hasField = true;
+    }
+    if (
+      typeof parsed.liveAdmission === 'object' &&
+      parsed.liveAdmission !== null &&
+      !Array.isArray(parsed.liveAdmission) &&
+      typeof parsed.liveAdmission.sessionId === 'string' &&
+      parsed.liveAdmission.sessionId &&
+      typeof parsed.liveAdmission.targetId === 'string' &&
+      parsed.liveAdmission.targetId
+    ) {
+      result.liveAdmission = { sessionId: parsed.liveAdmission.sessionId, targetId: parsed.liveAdmission.targetId };
+      hasField = true;
+    }
+    if (parsed.routingTargetSource === 'prose' || parsed.routingTargetSource === 'explicit') {
+      result.routingTargetSource = parsed.routingTargetSource;
+      hasField = true;
+    }
+    const liveCompanion = parseLiveCompanionCarrier(parsed.liveCompanion);
+    if (liveCompanion) {
+      result.liveCompanion = liveCompanion;
       hasField = true;
     }
 
@@ -409,6 +644,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isCloudBridgeRetryV1(parsed.cloudBridgeRetry)) {
+      result.cloudBridgeRetry = parsed.cloudBridgeRetry;
+      hasField = true;
+    }
+
     const proactive = parseProactiveCarrier(parsed.proactive);
     if (proactive) {
       result.proactive = proactive;
@@ -419,6 +659,23 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     if (meetingArtifact) {
       result.meetingArtifact = meetingArtifact;
       hasField = true;
+    }
+
+    if (Array.isArray(parsed.routingWarnings) && parsed.routingWarnings.length > 0) {
+      const routingWarnings: CatRoutingError[] = [];
+      let valid = true;
+      for (const candidate of parsed.routingWarnings as unknown[]) {
+        const warning = CatRoutingErrorSchema.safeParse(candidate);
+        if (!warning.success) {
+          valid = false;
+          break;
+        }
+        routingWarnings.push(warning.data);
+      }
+      if (valid) {
+        result.routingWarnings = routingWarnings;
+        hasField = true;
+      }
     }
 
     if (Array.isArray(parsed.dynamicSceneEntries)) {
@@ -468,6 +725,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const deliveryBoundary = parseMessageDeliveryBoundary(parsed.deliveryBoundary);
     if (deliveryBoundary) {
       result.deliveryBoundary = deliveryBoundary;
+      hasField = true;
+    }
+
+    const dotAsk = dotAskMetadataSchema.safeParse(parsed.dotAsk);
+    if (dotAsk.success) {
+      result.dotAsk = dotAsk.data;
       hasField = true;
     }
 
@@ -610,87 +873,40 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       result.targetCats = parsed.targetCats;
       hasField = true;
     }
+    const withoutWakeCatIds: unknown = parsed.notificationDelivery?.withoutWakeCatIds;
+    if (Array.isArray(withoutWakeCatIds) && withoutWakeCatIds.every(isNonEmptyString)) {
+      result.notificationDelivery = {
+        withoutWakeCatIds: withoutWakeCatIds.map(createCatId),
+      };
+      hasField = true;
+    }
 
+    if (
+      typeof parsed.callbackRichRequestDigest === 'string' &&
+      /^[0-9a-f]{64}$/.test(parsed.callbackRichRequestDigest)
+    ) {
+      result.callbackRichRequestDigest = parsed.callbackRichRequestDigest;
+      hasField = true;
+    }
     if (parsed.isExplicitPost === true) {
       result.isExplicitPost = true;
       hasField = true;
     }
 
-    if (parsed.freshness && typeof parsed.freshness === 'object') {
-      const freshness = parsed.freshness as Record<string, unknown>;
-      const priorFrontierMessageId =
-        typeof freshness.priorFrontierMessageId === 'string' || freshness.priorFrontierMessageId === null
-          ? freshness.priorFrontierMessageId
-          : undefined;
-      if ((freshness.kind === 'scan_pending' || freshness.kind === 'fresh') && priorFrontierMessageId !== undefined) {
-        result.freshness = { kind: freshness.kind, priorFrontierMessageId };
-        hasField = true;
-      } else if (
-        freshness.kind === 'published_with_unseen' &&
-        priorFrontierMessageId !== undefined &&
-        Array.isArray(freshness.generatedWithUnseen) &&
-        freshness.generatedWithUnseen.every((id) => typeof id === 'string') &&
-        typeof freshness.lineageId === 'string'
-      ) {
-        result.freshness = {
-          kind: 'published_with_unseen',
-          priorFrontierMessageId,
-          generatedWithUnseen: freshness.generatedWithUnseen as string[],
-          lineageId: freshness.lineageId,
-          ...(freshness.supplementFailureReason === 'infrastructure'
-            ? { supplementFailureReason: 'infrastructure' as const }
-            : {}),
-        };
-        hasField = true;
-      } else if (
-        freshness.kind === 'freshness_unknown' &&
-        priorFrontierMessageId !== undefined &&
-        typeof freshness.reason === 'string' &&
-        ['cursor_missing', 'scan_incomplete', 'error_failopen', 'queued_identity_missing'].includes(freshness.reason)
-      ) {
-        result.freshness = {
-          kind: 'freshness_unknown',
-          priorFrontierMessageId,
-          reason: freshness.reason as
-            | 'cursor_missing'
-            | 'scan_incomplete'
-            | 'error_failopen'
-            | 'queued_identity_missing',
-        };
-        hasField = true;
-      } else if (
-        freshness.kind === 'closure_replacement' &&
-        typeof freshness.closureId === 'string' &&
-        typeof freshness.targetCatId === 'string'
-      ) {
-        result.freshness = {
-          kind: 'closure_replacement',
-          closureId: freshness.closureId,
-          targetCatId: freshness.targetCatId,
-          ...(typeof freshness.originTriggerMessageId === 'string' || freshness.originTriggerMessageId === null
-            ? { originTriggerMessageId: freshness.originTriggerMessageId }
-            : {}),
-        };
-        hasField = true;
-      }
+    // F202 W2-5b: write-once marker — the outbound media job owns this message's publication.
+    if (parsed.mediaPublication === 'deferred') {
+      result.mediaPublication = 'deferred';
+      hasField = true;
     }
 
-    if (
-      parsed.supplement &&
-      typeof parsed.supplement === 'object' &&
-      typeof parsed.supplement.lineageId === 'string' &&
-      typeof parsed.supplement.supplementId === 'string' &&
-      (parsed.supplement.seq === 1 || parsed.supplement.seq === 2) &&
-      typeof parsed.supplement.originalMessageId === 'string' &&
-      parsed.supplement.lineageId === parsed.supplement.originalMessageId
-    ) {
-      result.supplement = {
-        lineageId: parsed.supplement.lineageId,
-        supplementId: parsed.supplement.supplementId,
-        seq: parsed.supplement.seq,
-        originalMessageId: parsed.supplement.originalMessageId,
-      };
-      hasField = true;
+    if (parsed.freshness && typeof parsed.freshness === 'object') {
+      // Legacy rows also carry a retired scan verdict under `kind`; the frontier is the only
+      // field anything reads, so it is the only field that survives the round trip.
+      const freshness = parsed.freshness as Record<string, unknown>;
+      if (typeof freshness.priorFrontierMessageId === 'string' || freshness.priorFrontierMessageId === null) {
+        result.freshness = { priorFrontierMessageId: freshness.priorFrontierMessageId };
+        hasField = true;
+      }
     }
 
     const recovery = parseRecoveryMarker(parsed.recovery);
@@ -699,7 +915,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
-    if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'context_briefing') {
+    if (
+      parsed.systemKind === 'a2a_routing' ||
+      parsed.systemKind === 'context_briefing' ||
+      parsed.systemKind === 'content_modification_receipt'
+    ) {
       result.systemKind = parsed.systemKind;
       hasField = true;
     }
@@ -708,6 +928,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       if (receipt.success) {
         result.systemInfo = { v: 1, payload: receipt.data, fallbackCatId: receipt.data.target.targetCatId };
         hasField = true;
+      } else if (parsed.systemKind === 'context_briefing') {
+        const notice = liveResultNoticeSchema.safeParse(parsed.systemInfo.payload);
+        if (notice.success) {
+          result.systemInfo = { v: 1, payload: notice.data };
+          hasField = true;
+        }
       }
     }
 
@@ -777,12 +1003,7 @@ function parsePawFeelSourceCrossPost(value: unknown): PawFeelSourceExtra['crossP
   return typeof crossPost?.sourceThreadId === 'string' ? { sourceThreadId: crossPost.sourceThreadId } : undefined;
 }
 
-/**
- * F278 reads canonical marker sources without hydrating history-only carriers.
- * The source verifier needs only stream invocation grouping and cross-post origin;
- * keep this narrow parser aligned to those two consumers rather than decoding rich
- * blocks or every optional extra carrier for each global inbox source.
- */
+/** Decode only the provenance fields consumed by the Paw Feel source verifier. */
 export function safeParsePawFeelSourceExtra(raw: string | undefined): PawFeelSourceExtra | undefined {
   if (!raw) return undefined;
   try {

@@ -6,10 +6,12 @@ interface EntrustedWorkProjectionResult {
   ownerReads: EntrustedWorkOwnerReadV1[];
   loading: boolean;
   error: boolean;
+  /** A confirmed snapshot exists for this same projection while revalidating. */
+  confirmed: boolean;
   refetch: () => void;
 }
 
-export type EntrustedWorkProjection = 'schedule' | 'needs-me';
+export type EntrustedWorkProjection = 'schedule' | 'needs-me' | 'completed';
 
 export function useEntrustedWorkProjection(
   projection: EntrustedWorkProjection = 'schedule',
@@ -17,6 +19,10 @@ export function useEntrustedWorkProjection(
   const [ownerReads, setOwnerReads] = useState<EntrustedWorkOwnerReadV1[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [resolution, setResolution] = useState<{
+    projection: EntrustedWorkProjection;
+    confirmed: boolean;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(async () => {
@@ -26,18 +32,29 @@ export function useEntrustedWorkProjection(
     setLoading(true);
     setError(false);
     try {
-      const endpoint = projection === 'needs-me' ? '/api/entrusted-work/needs-me' : '/api/entrusted-work/owner-reads';
+      const endpoint =
+        projection === 'needs-me'
+          ? '/api/entrusted-work/needs-me'
+          : projection === 'completed'
+            ? '/api/entrusted-work/owner-reads?view=completed'
+            : '/api/entrusted-work/owner-reads';
       const response = await apiFetch(endpoint, { signal: controller.signal }, { afterCurrentGet: true });
       if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
       const body = (await response.json()) as { ownerReads?: unknown };
       const parsed = entrustedWorkOwnerReadV1Schema.array().parse(body.ownerReads);
-      if (!controller.signal.aborted) setOwnerReads(parsed);
+      if (!controller.signal.aborted) {
+        setOwnerReads(parsed);
+        setResolution({ projection, confirmed: true });
+      }
     } catch (reason: unknown) {
       if (controller.signal.aborted || (reason instanceof DOMException && reason.name === 'AbortError')) return;
       setOwnerReads([]);
+      setResolution({ projection, confirmed: false });
       setError(true);
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [projection]);
 
@@ -53,5 +70,11 @@ export function useEntrustedWorkProjection(
     };
   }, [refetch]);
 
-  return { ownerReads, loading, error, refetch };
+  return {
+    ownerReads,
+    loading: loading || resolution?.projection !== projection,
+    confirmed: resolution?.projection === projection && resolution.confirmed && !error,
+    error,
+    refetch,
+  };
 }

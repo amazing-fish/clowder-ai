@@ -15,11 +15,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   captureProcessIdentity,
-  captureReadableIdentity,
-  compareStoredIdentity,
+  captureSpawnedIdentity,
   identityInspectionIsUnreadable,
+  inspectProcessIdentity,
   observeProcessIdentity,
-  spawnedIdentityRefusal,
   waitUntilIdentityGone,
 } from './process-identity.mjs';
 
@@ -105,15 +104,13 @@ export function writeDaemonState({
   ports,
   captureIdentity = captureProcessIdentity,
 }) {
+  const expectedRoot = canonicalPath(projectRoot);
   let identity;
   try {
-    identity = captureReadableIdentity(pid, { capture: captureIdentity });
+    identity = captureSpawnedIdentity(pid, expectedRoot, launchToken, { capture: captureIdentity });
   } catch (error) {
     throw new DaemonStateError(error.reason ?? 'spawned-process-identity-unreadable', error.message, error.details);
   }
-  const expectedRoot = canonicalPath(projectRoot);
-  const refusal = spawnedIdentityRefusal(pid, identity, expectedRoot, launchToken);
-  if (refusal) throw new DaemonStateError(refusal.reason, refusal.message, refusal.details);
   const state = stateFromIdentity({
     pid,
     identity,
@@ -177,20 +174,7 @@ export function inspectDaemonState({
     return { kind: 'mismatch', reason: 'state-owner-mismatch', state };
   }
 
-  const observed = observeProcessIdentity(state.pid, captureIdentity);
-  if (observed.status === 'absent') {
-    return { kind: 'stale', reason: 'process-not-running', state };
-  }
-  if (observed.status === 'unknown') {
-    return { kind: 'mismatch', reason: 'process-identity-unreadable', state, error: observed.error };
-  }
-  const identity = observed.identity;
-  const comparison = compareStoredIdentity(state, identity);
-  if (comparison !== 'match') {
-    const reason = comparison === 'unknown' ? 'process-argv-unavailable' : 'process-identity-mismatch';
-    return { kind: 'mismatch', reason, state, identity };
-  }
-  return { kind: 'running', state, identity };
+  return inspectProcessIdentity(state, captureIdentity);
 }
 
 export function refusalFromInspection(inspection) {
