@@ -55,6 +55,7 @@ describe('TurnExecutionStartupReconciler', () => {
 
       assert.deepEqual(await store.get('windows-old-child'), {
         ...runningInput('windows-old-child', 50),
+        outputFence: 'open',
         status: 'interrupted',
         endedAt: 200,
         terminalReason: 'process_restart',

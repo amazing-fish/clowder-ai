@@ -38,4 +38,14 @@ node --test --test-name-pattern='Windows|owner|PID|group signalling|Linux|TurnEx
 
 ## 运行态验收边界
 
-代码尚未在运行实例激活。需经 review、合入/运行态激活授权后，由 operator 在空闲窗口重启；再核对旧 child 的 durable 终态、running 索引与侧栏投影。此处未重启 API、修改用户 Redis 或写入运行配置，也不把隔离组件测试表述为线上已恢复。
+本轮未在运行实例激活同步后的代码。需经 review、合入/运行态激活授权后，在空闲窗口重启；再核对旧 child 的 durable 终态、running 索引与侧栏投影。此处未重启 API、修改用户 Redis 或写入运行配置，也不把隔离组件测试表述为线上已恢复。
+
+## 2026-10-22 同步 main 后的复验
+
+先合入 `main@3c0a20097f19dbef736403d78ce8fbde54d68d19`，无文本冲突，再判断当前回归。现有 main 仍在明确空 PID 判断之前返回 Windows unknown，窄修复仍有必要。
+
+- main 已引入执行记录默认 `outputFence: 'open'`。新增 Windows 组合测试的精确预期补入该字段，与 main 中原有启动恢复测试保持一致；旧 child 的终态、终结原因及 running index 断言全部保留。
+- 合并后 API 完整构建通过。上述定向命令为 39 项、37 通过、2 项原有平台跳过、0 失败；包含同步/异步快照、缺失/空目录、有有效 manifest 的未知活性、目录读取失败及当前 turn 保护。
+- 独立对比当前 main：仅将工位内编译的 ownership 模块换为 `upstream/main` 源码编译版本，其他生产依赖与 main 相同，三个 Windows 回归全部失败；恢复候选模块后通过。
+- 两项已披露的较宽 Windows 测试在候选和当前 main ownership 模块下均以相同原因失败：socket 用例调用 Windows 明确不支持的 Unix socket 工厂；reaper 用例期待隔离畸形 manifest，但既有 reaper 在 Windows 直接返回零计数。两条原测试均未修改或新增跳过，生产 reaper 和 socket 工厂也未改动。这核实了它们在当前 main 上仍是平台基线问题，不宣称完整 Windows 套件全绿。
+- 对比仅在隔离工位的编译产物中进行，结束后恢复候选模块；所有 fixture 使用内存和临时目录，Redis 绑定不可连接端口，未连接用户数据库或调用真实模型。
