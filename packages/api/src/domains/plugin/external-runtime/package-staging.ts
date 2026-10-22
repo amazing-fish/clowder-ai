@@ -1,11 +1,17 @@
 import { execFile } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { constants, createReadStream, type Stats } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises';
+import { constants, createReadStream, createWriteStream, type Stats } from 'node:fs';
+import { lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
-import { type PluginManifest, validateManifest } from '@clowder-ai/plugin-contract';
+import { type PluginManifest } from '@clowder-ai/plugin-contract';
 import { parse as parseYaml } from 'yaml';
+import { validateHostPluginManifest as validateManifest } from '../desktop-window-runtime/presentation-manifest.js';
+import { PLUGIN_ARCHIVE_BUDGET, preflightPluginArchive } from './archive-preflight.js';
+import { recordPackageStagingPhase } from './package-staging-diagnostics.js';
+import { sealStaticPackage } from './static-package-seal.js';
 import type { VerifiedPluginPackage } from './types.js';
 import { ExternalPluginRuntimeError } from './types.js';
 
@@ -36,6 +42,7 @@ interface StageVerifiedPackageArchiveInput {
   readonly packagesRoot: string;
   readonly packageDigest: string;
   readonly tarBin: string;
+  readonly signal?: AbortSignal;
   readonly validateManifest?: PluginManifestValidator;
 }
 
@@ -51,6 +58,35 @@ async function sha512File(path: string): Promise<Buffer> {
     stream.once('error', reject);
     stream.once('end', () => resolveDigest(hash.digest()));
   });
+}
+
+async function sealArchive(source: string, destination: string, signal?: AbortSignal): Promise<void> {
+  let bytes = 0;
+  const bound = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      callback(
+        bytes > PLUGIN_ARCHIVE_BUDGET.compressedBytes ? runtimeError('archive compressed byte limit exceeded') : null,
+        chunk,
+      );
+    },
+  });
+  const deadline = AbortSignal.timeout(PLUGIN_ARCHIVE_BUDGET.deadlineMs);
+  const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.size > PLUGIN_ARCHIVE_BUDGET.compressedBytes) {
+      throw runtimeError('archive must be a regular file within the compressed byte limit');
+    }
+    await pipeline(
+      handle.createReadStream({ autoClose: false }),
+      bound,
+      createWriteStream(destination, { flags: 'wx', mode: 0o600 }),
+      { signal: signal ? AbortSignal.any([signal, deadline]) : deadline },
+    );
+  } finally {
+    await handle.close();
+  }
 }
 
 async function verifyArchiveDigest(archivePath: string, packageDigest: string): Promise<void> {
@@ -166,9 +202,9 @@ async function readPackageManifest(rootDir: string): Promise<unknown> {
   throw runtimeError('installed package has no canonical plugin.yaml or legacy manifest.json');
 }
 
-export async function stageVerifiedPackageArchive(
+export async function stageVerifiedPackageContent(
   input: StageVerifiedPackageArchiveInput,
-): Promise<VerifiedPluginPackage> {
+): Promise<Omit<VerifiedPluginPackage, 'manifest'>> {
   const archivePath = resolve(input.artifactRoot, PACKAGE_ARCHIVE_FILENAME);
   let archiveStat: Stats;
   try {
@@ -179,6 +215,9 @@ export async function stageVerifiedPackageArchive(
   if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
     throw runtimeError('staged package archive must be a regular file');
   }
+  if (archiveStat.size > PLUGIN_ARCHIVE_BUDGET.compressedBytes)
+    throw runtimeError('archive compressed byte limit exceeded');
+  input.signal?.throwIfAborted();
   await mkdir(input.packagesRoot, { recursive: true });
   const stageParent = await mkdtemp(resolve(input.packagesRoot, '.runtime-stage-'));
   const sealedArchivePath = resolve(stageParent, PACKAGE_ARCHIVE_FILENAME);
@@ -190,45 +229,94 @@ export async function stageVerifiedPackageArchive(
     released = true;
     await rm(stageParent, { recursive: true, force: true });
   };
+  let phase = 'copy';
   try {
-    await copyFile(archivePath, sealedArchivePath, constants.COPYFILE_EXCL);
+    await sealArchive(archivePath, sealedArchivePath, input.signal);
+    phase = 'digest';
     await verifyArchiveDigest(sealedArchivePath, input.packageDigest);
+    phase = 'preflight';
+    await preflightPluginArchive(sealedArchivePath, input.signal);
+    phase = 'list';
     const archiveEnvironment = { PATH: process.env.PATH ?? '/usr/bin:/bin', LC_ALL: 'C' };
-    const [list, verboseList] = await Promise.all([
-      execFileAsync(input.tarBin, ['-tzf', sealedArchivePath], {
+    const listings = [
+      // GNU tar interprets the colon in Windows drive paths as host:file.
+      // Resolve the sealed archive within this Host-owned staging directory.
+      execFileAsync(input.tarBin, ['-tzf', PACKAGE_ARCHIVE_FILENAME], {
+        cwd: stageParent,
         env: archiveEnvironment,
         maxBuffer: 8 * 1024 * 1024,
+        timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs,
+        signal: input.signal,
       }),
-      execFileAsync(input.tarBin, ['-tvzf', sealedArchivePath], {
+      execFileAsync(input.tarBin, ['-tvzf', PACKAGE_ARCHIVE_FILENAME], {
+        cwd: stageParent,
         env: archiveEnvironment,
         maxBuffer: 8 * 1024 * 1024,
+        timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs,
+        signal: input.signal,
       }),
-    ]);
+    ] as const;
+    const [list, verboseList] = await Promise.all(listings).catch(async (error: unknown) => {
+      // Both tar children own this cwd until close. Preserve the first failure,
+      // but drain its sibling before the outer catch removes the stage.
+      await Promise.allSettled(listings);
+      throw error;
+    });
     const members = archiveMembers(list.stdout);
     validateArchiveMemberTypes(verboseList.stdout, members.length);
+    phase = 'extract';
     await mkdir(partialRoot);
-    await execFileAsync(input.tarBin, ['-xzf', sealedArchivePath, '-C', partialRoot, '--strip-components=1'], {
+    await execFileAsync(input.tarBin, ['-xzf', PACKAGE_ARCHIVE_FILENAME, '-C', 'partial', '--strip-components=1'], {
+      cwd: stageParent,
       env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
       maxBuffer: 8 * 1024 * 1024,
+      timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs,
+      signal: input.signal,
     });
+    phase = 'tree';
     const admittedSnapshot = await snapshotPackageTree(partialRoot);
     await rename(partialRoot, readyRoot);
 
-    const value = await readPackageManifest(readyRoot);
-    const validation = (input.validateManifest ?? validateManifest)(value);
-    if (!validation.valid) throw runtimeError('installed package manifest fails the published contract');
-
     const verifyIntegrity = async () => {
+      if (released) throw runtimeError('staged package was released');
       const current = await snapshotPackageTree(readyRoot);
-      if (!sameSnapshot(admittedSnapshot, current)) {
+      if (released || !sameSnapshot(admittedSnapshot, current)) {
         throw runtimeError('launchable package bytes changed after verified staging');
       }
     };
-    await verifyIntegrity();
-    return { rootDir: readyRoot, manifest: validation.manifest, verifyIntegrity, release };
+    phase = 'seal';
+    const verifySeal = await sealStaticPackage(readyRoot, verifyIntegrity);
+    const verifyStaticIntegrity = async () => {
+      if (released) throw runtimeError('staged package was released');
+      await verifySeal();
+      if (released) throw runtimeError('staged package was released');
+    };
+    return { rootDir: readyRoot, verifyIntegrity, verifyStaticIntegrity, release };
   } catch (error) {
     await release().catch(() => undefined);
+    const failure =
+      error instanceof ExternalPluginRuntimeError
+        ? error
+        : runtimeError(`installed package ${input.packageDigest} could not be verified and staged`, error);
+    throw recordPackageStagingPhase(failure, phase);
+  }
+}
+
+/** The byte staging boundary is shared by plugin and registry dependency archives.
+ * Only this wrapper grants a validated plugin manifest to runtime callers. */
+export async function stageVerifiedPackageArchive(
+  input: StageVerifiedPackageArchiveInput,
+): Promise<VerifiedPluginPackage> {
+  const staged = await stageVerifiedPackageContent(input);
+  try {
+    const value = await readPackageManifest(staged.rootDir);
+    const validation = (input.validateManifest ?? validateManifest)(value);
+    if (!validation.valid) throw runtimeError('installed package manifest fails the published contract');
+    await staged.verifyIntegrity();
+    return { ...staged, manifest: validation.manifest };
+  } catch (error) {
+    await staged.release();
     if (error instanceof ExternalPluginRuntimeError) throw error;
-    throw runtimeError(`installed package ${input.packageDigest} could not be verified and staged`, error);
+    throw runtimeError('installed package manifest could not be verified', error);
   }
 }

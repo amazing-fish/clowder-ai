@@ -20,6 +20,7 @@ import type {
 } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { ApprovedTaskContinuationInput } from '../../../../ball-custody/approved-task-continuation.js';
 import type {
   ClaimForApprovalInput,
   CreateProposalInput,
@@ -30,8 +31,10 @@ import type {
 } from '../ports/ProposalStore.js';
 import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
 import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
+import { finalizeRedisProposalApproval } from './RedisProposalApproval.js';
+import { continueRedisApprovedTask } from './RedisProposalContinuation.js';
+import { createdThreadCheckpointFields } from './RedisProposalStoreFields.js';
 import {
-  applyFinalize,
   CAS_TRANSITION_LUA,
   hydrateProposal,
   RECORD_CREATED_THREAD_LUA,
@@ -50,11 +53,7 @@ export class RedisProposalStore implements IProposalStore {
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number; dedupTtlSeconds?: number }) {
     this.redis = redis;
-    // Iron law #5 (LL-048): user-visible/recoverable state defaults to persistent (no TTL).
-    // Proposal hashes carry approval-card UI state + audit lineage (createdFromProposalId);
-    // an automatic expiry would 404 old cards, orphan pending/user/thread zset members, and
-    // erase the approval trail. TTL is only set when the caller explicitly opts in with
-    // ttlSeconds > 0.
+    // LL-048: proposal UI state and audit lineage persist unless the caller opts in to a positive TTL.
     const ttl = options?.ttlSeconds;
     if (ttl !== undefined && Number.isFinite(ttl) && ttl > 0) {
       this.ttlSeconds = Math.floor(ttl);
@@ -62,6 +61,10 @@ export class RedisProposalStore implements IProposalStore {
       this.ttlSeconds = null;
     }
     this.dedupTtlSeconds = options?.dedupTtlSeconds ?? DEFAULT_DEDUP_TTL_SECONDS;
+  }
+
+  continueApprovedTask(input: ApprovedTaskContinuationInput) {
+    return continueRedisApprovedTask(this.redis, input);
   }
 
   async create(input: CreateProposalInput): Promise<ThreadProposal> {
@@ -84,6 +87,9 @@ export class RedisProposalStore implements IProposalStore {
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
       ...(input.declaredWorkMode ? { declaredWorkMode: input.declaredWorkMode } : {}),
+      ...(input.subjectTaskId ? { subjectTaskId: input.subjectTaskId } : {}),
+      ...(input.subjectTaskTitle ? { subjectTaskTitle: input.subjectTaskTitle } : {}),
+      ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: input.approvedDevelopmentScope } : {}),
     };
 
     const key = ProposalKeys.detail(proposal.proposalId);
@@ -115,6 +121,10 @@ export class RedisProposalStore implements IProposalStore {
     return this.loadFromIndex(ProposalKeys.threadList(threadId), limit);
   }
 
+  async listAllByThread(threadId: string): Promise<ThreadProposal[]> {
+    return this.loadFromIndex(ProposalKeys.threadList(threadId), null);
+  }
+
   async claimForApproval(input: ClaimForApprovalInput): Promise<ThreadProposal | null> {
     const proposal = await this.get(input.proposalId);
     if (!proposal || proposal.status !== 'pending') return null;
@@ -131,14 +141,8 @@ export class RedisProposalStore implements IProposalStore {
     return { ...proposal, status: 'approving', approvedBy: input.approvedBy, claimedAt };
   }
 
-  async finalizeApproval(input: FinalizeApprovalInput): Promise<ThreadProposal | null> {
-    const proposal = await this.get(input.proposalId);
-    if (!proposal || proposal.status !== 'approving') return null;
-    const now = Date.now();
-    const updated = applyFinalize(proposal, input, now);
-    const pairs = this.finalizedFields(updated);
-    const ok = await this.casTransition(updated.proposalId, updated.createdBy, 'approving', 'noop', '', pairs);
-    return ok ? updated : null;
+  finalizeApproval(input: FinalizeApprovalInput): Promise<ThreadProposal | null> {
+    return finalizeRedisProposalApproval(this.redis, input);
   }
 
   async recordCreatedThread(proposalId: string, threadId: string, overrides?: ProposalApproveOverrides): Promise<void> {
@@ -146,7 +150,7 @@ export class RedisProposalStore implements IProposalStore {
       RECORD_CREATED_THREAD_LUA,
       1,
       ProposalKeys.detail(proposalId),
-      ...this.createdThreadCheckpointFields(threadId, overrides),
+      ...createdThreadCheckpointFields(threadId, overrides),
     );
   }
 
@@ -284,52 +288,8 @@ export class RedisProposalStore implements IProposalStore {
     return result === 1;
   }
 
-  private finalizedFields(updated: ThreadProposal): string[] {
-    const fields: string[] = [
-      'status',
-      'approved',
-      'approvedAt',
-      String(updated.approvedAt ?? 0),
-      'claimedAt',
-      '0',
-      'title',
-      updated.title,
-      'parentThreadId',
-      updated.parentThreadId,
-      'preferredCats',
-      JSON.stringify(updated.preferredCats),
-      // F128: persist project ownership on finalize so an approve-time re-home (overrides
-      // .projectPath, applied by applyOverrides) is durable. Without this HSET the hash keeps
-      // the create-time projectPath and a fresh get() hydrates a stale value — a Redis-only
-      // divergence the in-memory store can't surface (LL: in-memory masks Redis behavior).
-      'projectPath',
-      updated.projectPath,
-      'reportingMode',
-      updated.reportingMode ?? '',
-      'declaredWorkMode',
-      updated.declaredWorkMode ?? '',
-    ];
-    if (updated.createdThreadId) fields.push('createdThreadId', updated.createdThreadId);
-    fields.push('initialMessage', updated.initialMessage ?? '');
-    return fields;
-  }
-
-  private createdThreadCheckpointFields(threadId: string, overrides: ProposalApproveOverrides | undefined): string[] {
-    const fields = ['createdThreadId', threadId];
-    if (!overrides) return fields;
-    if (overrides.title !== undefined) fields.push('title', overrides.title);
-    if (overrides.parentThreadId !== undefined) fields.push('parentThreadId', overrides.parentThreadId);
-    if (overrides.preferredCats !== undefined) fields.push('preferredCats', JSON.stringify(overrides.preferredCats));
-    if (overrides.projectPath !== undefined) fields.push('projectPath', overrides.projectPath);
-    if (overrides.reportingMode !== undefined) fields.push('reportingMode', overrides.reportingMode);
-    if (overrides.declaredWorkMode !== undefined) fields.push('declaredWorkMode', overrides.declaredWorkMode);
-    if (overrides.initialMessage === null) fields.push('initialMessage', '');
-    else if (typeof overrides.initialMessage === 'string') fields.push('initialMessage', overrides.initialMessage);
-    return fields;
-  }
-
-  private async loadFromIndex(indexKey: string, limit: number): Promise<ThreadProposal[]> {
-    const ids = await this.redis.zrevrange(indexKey, 0, Math.max(0, limit - 1));
+  private async loadFromIndex(indexKey: string, limit: number | null): Promise<ThreadProposal[]> {
+    const ids = await this.redis.zrevrange(indexKey, 0, limit === null ? -1 : Math.max(0, limit - 1));
     if (ids.length === 0) return [];
     const pipeline = this.redis.pipeline();
     for (const id of ids) pipeline.hgetall(ProposalKeys.detail(id));

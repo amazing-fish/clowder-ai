@@ -87,7 +87,7 @@ describe('GET /api/approval-hub/pending', () => {
     assert.ok(body.items.every((i) => i.ownerUserId === 'user-1'));
     assert.deepEqual(
       body.manifest.map((entry) => entry.id),
-      ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F266', 'F221', 'F276', 'F292', 'F306'],
+      ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F266', 'F221', 'F321', 'F276', 'F306'],
     );
   });
 
@@ -266,8 +266,8 @@ describe('F246 approval fan-out telemetry and failure policy', () => {
       'F260',
       'F266',
       'F276',
-      'F292',
       'F306',
+      'F321',
     ]);
     const f128 = adapterMeasurements.find((entry) => entry.producerId === 'F128');
     assert.equal(f128.itemCount, 1);

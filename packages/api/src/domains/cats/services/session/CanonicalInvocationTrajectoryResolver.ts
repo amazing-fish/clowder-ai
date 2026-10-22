@@ -1,12 +1,12 @@
-import type { InvocationTrajectoryStatus, InvocationTrajectorySummary } from '@cat-cafe/shared';
+import type { InvocationTrajectoryStatus, InvocationTrajectorySummary, SessionStatus } from '@cat-cafe/shared';
 import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordStore.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../stores/ports/TurnExecutionStore.js';
 import { projectInvocationTerminalEvidence } from './InvocationTrajectoryProjector.js';
-import { projectRequestGenerations } from './RequestGenerationProjector.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 import { filterThreadRecords, resolveThreadAccess, threadAccessDeniedBody } from './thread-access-policy.js';
+import { projectRequestGenerations } from './transcript-index/RequestGenerationProjector.js';
 
 /** Transcript content stays immutable; matching durable terminals supply lifecycle truth. */
 export async function resolveCanonicalInvocationSummaries(
@@ -56,7 +56,7 @@ interface InvocationSession {
   userId: string;
   cliSessionId?: string;
   seq: number;
-  status: string;
+  status: SessionStatus;
 }
 
 type FailureStatus = 403 | 404 | 409;
@@ -79,6 +79,7 @@ export interface CanonicalInvocationTrajectoryInput {
   threadIdHint?: string;
   sessionIdHint?: string;
   callerCatId?: string;
+  signal?: AbortSignal;
 }
 
 interface CanonicalInvocationTrajectoryDependencies {
@@ -86,7 +87,11 @@ interface CanonicalInvocationTrajectoryDependencies {
   turnExecutionStore: Pick<ITurnExecutionStore, 'get'>;
   sessionChainStore: Pick<ISessionChainStore, 'getChainByThread'>;
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
-  readInvocationEvents: (session: InvocationSession, invocationId: string) => Promise<readonly TranscriptEvent[]>;
+  readInvocationEvents: (
+    sessions: InvocationSession[],
+    invocationId: string,
+    signal?: AbortSignal,
+  ) => Promise<ReadonlyMap<string, readonly TranscriptEvent[]>>;
 }
 
 function failure(status: FailureStatus, code: string, error: string, reason?: string): ResolutionResult {
@@ -181,14 +186,10 @@ export async function resolveCanonicalInvocationTrajectory(
   const scopedSessions = input.callerCatId
     ? executionSessions.filter((session) => session.catId === input.callerCatId)
     : executionSessions;
-  const matches = (
-    await Promise.all(
-      scopedSessions.map(async (session) => ({
-        session,
-        events: await dependencies.readInvocationEvents(session, input.invocationId),
-      })),
-    )
-  ).filter((candidate) => candidate.events.length > 0);
+  const eventsBySession = await dependencies.readInvocationEvents(scopedSessions, input.invocationId, input.signal);
+  const matches = scopedSessions
+    .map((session) => ({ session, events: eventsBySession.get(session.id) ?? [] }))
+    .filter((candidate) => candidate.events.length > 0);
 
   if (matches.length === 0) return failure(404, 'INVOCATION_SESSION_NOT_FOUND', 'Invocation session not found');
   const evidence = resolveSessionEvidence(matches);

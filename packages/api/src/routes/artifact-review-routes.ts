@@ -5,6 +5,8 @@ import type { ArtifactReviewService } from '../domains/collaborative-content/art
 import type { MediaReviewPrincipal } from '../domains/video-studio/content-owner/published-media-access.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
+import { registerMediaFileActions } from './media-file-actions.js';
+import { sendPublishedMedia } from './published-media-response.js';
 
 const paramsSchema = z.object({ reviewId: z.string().min(1).max(128) }).strict();
 export interface ArtifactReviewRoutesDeps {
@@ -20,6 +22,28 @@ export function registerArtifactReviewRoutes(app: FastifyInstance, deps: Artifac
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     if (!humanPrincipal(request)) return reply.code(401).send({ error: 'identity_required' });
+  });
+  registerMediaFileActions(app, '/api/artifact-reviews/:reviewId/media/:round', {
+    onError: replyArtifactReviewError,
+    authorize: async (request) => {
+      const principal = humanPrincipal(request);
+      if (!principal) return null;
+      const { reviewId, round } = paramsSchema
+        .extend({ round: z.coerce.number().int().positive() })
+        .parse(request.params);
+      const media = await deps.reviews.openMedia(reviewId, round, principal, true);
+      try {
+        return {
+          path: media.path,
+          mime: media.mediaType,
+          byteLength: media.byteLength,
+          author: media.fileAuthor,
+          createdAt: media.fileCreatedAt,
+        };
+      } finally {
+        await media.handle.close();
+      }
+    },
   });
   app.post('/api/artifact-reviews/prepare', async (request, reply) => {
     try {
@@ -113,30 +137,7 @@ export function registerArtifactReviewRoutes(app: FastifyInstance, deps: Artifac
         .extend({ round: z.coerce.number().int().positive() })
         .parse(request.params);
       const media = await deps.reviews.openMedia(reviewId, round, principal);
-      reply
-        .header('Content-Type', media.mediaType)
-        .header('X-Content-Type-Options', 'nosniff')
-        .header('Accept-Ranges', 'bytes');
-      try {
-        const range = request.headers.range;
-        if (!range)
-          return reply
-            .header('Content-Length', media.byteLength)
-            .send(media.handle.createReadStream({ autoClose: true }));
-        const parsed = parseRange(range, media.byteLength);
-        if (!parsed) {
-          await media.handle.close();
-          return reply.code(416).header('Content-Range', `bytes */${media.byteLength}`).send();
-        }
-        return reply
-          .code(206)
-          .header('Content-Range', `bytes ${parsed.start}-${parsed.end}/${media.byteLength}`)
-          .header('Content-Length', parsed.end - parsed.start + 1)
-          .send(media.handle.createReadStream({ ...parsed, autoClose: true }));
-      } catch (error) {
-        await media.handle.close();
-        throw error;
-      }
+      return await sendPublishedMedia(request, reply, media);
     } catch (error) {
       return replyArtifactReviewError(reply, error);
     }
@@ -152,20 +153,4 @@ function humanPrincipal(request: FastifyRequest): MediaReviewPrincipal | null {
     return null;
   const userId = resolveStrictUserId(request);
   return userId ? { userId, actor: { kind: 'human', actorId: userId } } : null;
-}
-
-function parseRange(value: string, length: number): { start: number; end: number } | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
-  if (!match || (!match[1] && !match[2])) return null;
-  const suffix = !match[1];
-  const first = Number(match[1] || match[2]);
-  const end = suffix || !match[2] ? length - 1 : Math.min(Number(match[2]), length - 1);
-  const start = suffix ? Math.max(0, length - first) : first;
-  return Number.isSafeInteger(first) &&
-    Number.isSafeInteger(end) &&
-    (!suffix || first > 0) &&
-    start <= end &&
-    start < length
-    ? { start, end }
-    : null;
 }

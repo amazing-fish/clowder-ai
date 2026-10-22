@@ -95,6 +95,7 @@ function classifyApprovedDispatchProposal(
 }
 
 export class ActionSuccessorDispatchRecovery {
+  private inFlight: Promise<ActionSuccessorDispatchRecoveryStats> | undefined;
   private readonly now: () => number;
   private readonly scanLimit: number;
 
@@ -103,7 +104,16 @@ export class ActionSuccessorDispatchRecovery {
     this.scanLimit = deps.scanLimit ?? DEFAULT_SCAN_LIMIT;
   }
 
-  async runOnce(): Promise<ActionSuccessorDispatchRecoveryStats> {
+  runOnce(): Promise<ActionSuccessorDispatchRecoveryStats> {
+    if (this.inFlight) return this.inFlight;
+    const cycle = this.runCycle().finally(() => {
+      if (this.inFlight === cycle) this.inFlight = undefined;
+    });
+    this.inFlight = cycle;
+    return cycle;
+  }
+
+  private async runCycle(): Promise<ActionSuccessorDispatchRecoveryStats> {
     const leases = await this.deps.leaseStore.listPendingDispatches(this.scanLimit);
     let delivered = 0;
     let pending = 0;
@@ -125,6 +135,12 @@ export class ActionSuccessorDispatchRecovery {
     if (!predicate) return { outcome: 'pending' };
 
     const now = this.now();
+    return this.recoverAuthorized(candidate, now);
+  }
+
+  private async recoverAuthorized(candidate: ActionSuccessorLease, now: number): Promise<DispatchRecoveryResult> {
+    const predicate = candidate.terminalPredicate;
+    if (!predicate) return { outcome: 'pending' };
     if (candidate.dispatchDeliveryReservation) {
       return this.recoverReserved(candidate, now);
     }

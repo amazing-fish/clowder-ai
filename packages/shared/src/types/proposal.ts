@@ -7,7 +7,9 @@
  */
 
 import type { ApprovalPublication } from './approval-hub.js';
+import type { DevelopmentScopeV1 } from './growing-development.js';
 import type { CatId } from './ids.js';
+import type { ApprovedTaskContractV1, TaskContractContinuationV1 } from './proposal-task-contract.js';
 
 /**
  * Status lifecycle:
@@ -87,6 +89,37 @@ export interface ThreadProposal {
    * card append would otherwise hand callers a phantom proposalId that gets cleaned up.
    */
   cardMessageId?: string;
+
+  /**
+   * F167 × F322: When this proposal delegates work for a specific task,
+   * this records the exact task ID. Without this, the delegate binding
+   * provider cannot prove task-level delegation and will fail closed.
+   *
+   * Set at propose time when the proposing cat is working on a known task.
+   * Absent on legacy proposals or proposals not tied to a specific task.
+   */
+  subjectTaskId?: string;
+  /**
+   * F167 R4: Immutable snapshot of the task's title at proposal creation time.
+   * Displayed on the operator approval card so the user can see which task's execution
+   * authority they are granting. Also serves as an audit trail — if the task title
+   * changes after approval, this records what was originally authorized.
+   */
+  subjectTaskTitle?: string;
+  /**
+   * F167 R5: Immutable snapshot of the task's `entrustedWork.developmentScope` at
+   * proposal creation time. At claim time, the provider compares this against the
+   * task's current scope — if workUnitRef, acceptedSourceRef, or acceptedRevision
+   * changed, the delegation is invalidated (scope drift). Generic Tasks require
+   * a server-derived full-contract continuation; two absent scopes never grant authority.
+   */
+  approvedDevelopmentScope?: DevelopmentScopeV1;
+  /** Full generic contract frozen at approval; old approvals remain unchanged. */
+  approvedTaskContract?: ApprovedTaskContractV1;
+  /** One permanent, owner-requested continuation of this exact approved contract. */
+  taskContractContinuation?: TaskContractContinuationV1;
+  /** Read-side corruption marker. Invalid scope/contract data must never become generic authority. */
+  approvalContractInvalid?: true;
 
   // Audit — approval outcome
   approvedBy?: string;

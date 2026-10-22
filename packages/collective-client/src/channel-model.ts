@@ -28,7 +28,7 @@ export function groupChannelThreads(events: readonly CollectiveEventEnvelope[]):
 
 export function actorOrigin(event: CollectiveEventEnvelope): string {
   if (event.actor.kind === 'human') return 'Collective 成员 · 人';
-  return `${event.actor.human.displayName} · ${event.actor.provenance.endpointLabel ?? '已配对的工作空间'} (${event.actor.provenance.endpointId.slice(-6)}) · 猫`;
+  return `${event.actor.provenance.endpointLabel ?? '已配对的 Café'} · 猫`;
 }
 
 export function actorId(event: CollectiveEventEnvelope): string {
@@ -53,8 +53,8 @@ export function targetLabel(target: CollectiveTarget): string | undefined {
   return undefined;
 }
 
-export function formatEventTime(acceptedAt: string): string {
-  return new Intl.DateTimeFormat('zh-CN', {
+export function formatEventTime(acceptedAt: string, language: 'zh' | 'en' = 'zh'): string {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(acceptedAt));

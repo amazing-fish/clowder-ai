@@ -7,6 +7,7 @@
  * the exact failure F300 exists to remove.
  */
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { buildAuthHeaders, getCallbackConfig } from './callback-tools.js';
@@ -28,7 +29,7 @@ const admissionReason = {
   admissionRef: 'file:docs/features/F300-self-sensing-home-state-awareness.md' as const,
 };
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env['CAT_CAFE_API_URL'] ?? deploymentDefaults.apiBaseUrl;
 const TIMEOUT_MS = 5_000;
 
 /**
@@ -69,6 +70,48 @@ export async function handleHomeStateSelf(_input: Record<string, never> = {}): P
   }
 }
 
+/**
+ * `projectPath` picks which project's capabilities to read, like the Console's
+ * project selector. It does not pick who is asking: that is still the
+ * invocation's credentials, which also decide whose per-cat state is shown.
+ */
+export const capabilitiesSnapshotInputSchema = {
+  projectPath: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Absolute path of the project to read. Omit for the home itself (the Console global view).'),
+};
+
+export async function handleCapabilitiesSnapshot(input: { projectPath?: string } = {}): Promise<ToolResult> {
+  const query = input.projectPath ? `?projectPath=${encodeURIComponent(input.projectPath)}` : '';
+  const url = `${API_URL}/api/capabilities/snapshot${query}`;
+  const config = getCallbackConfig();
+  if (!config) {
+    return errorResult(
+      "The capability snapshot needs this invocation's credentials to know whose per-cat state to show, and none are available.",
+    );
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: buildAuthHeaders(config),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return errorResult(
+        `Capability snapshot unavailable: HTTP ${response.status} from ${url}. ` +
+          'Not reading the board is not the same as the board being empty.',
+      );
+    }
+    return successResult(JSON.stringify(await response.json(), null, 2));
+  } catch (error) {
+    return errorResult(
+      `Capability owner unreachable at ${url}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export const homeStateTools = [
   defineTool({
     name: 'cat_cafe_home_state_self',
@@ -82,6 +125,24 @@ export const homeStateTools = [
     handler: handleHomeStateSelf,
     governance: {
       implementationExport: 'handleHomeStateSelf',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      standaloneReason: admissionReason,
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_capabilities_snapshot',
+    description:
+      "Return the home's capability board (MCP servers and skills, the same one the Console's capability page shows) with your own per-cat enabled state. " +
+      'Use when: deciding whether something you or the user want to do is already covered by an installed capability; explaining why a capability is or is not available to you; checking skill mount health. ' +
+      "Not for: turning capabilities on or off (that is the Console), reading other cats' toggles, or live MCP connection checks. " +
+      'Output: { status, scope, envelope, board } — envelope.revision and sourceRefs match what the Console read for the same state. Reading never creates or changes any config. ' +
+      'GOTCHA: status "absent" means the project has no capability config yet and "unknown" means it could not be read; neither means "no capabilities".',
+    inputSchema: capabilitiesSnapshotInputSchema,
+    handler: handleCapabilitiesSnapshot,
+    governance: {
+      implementationExport: 'handleCapabilitiesSnapshot',
       action: 'read',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full', 'readonly'],

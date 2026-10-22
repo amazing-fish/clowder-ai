@@ -1,17 +1,15 @@
 import { hasUsableAgentKeyCredentials } from '@cat-cafe/shared/utils';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { projectAgentKeyCollaborationContract } from './agent-key-collaboration-contract.js';
 import { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
 import { derivedProfileSet, projectServerFamily } from './canonical-tool-registry.js';
+import { registerCoCreatorPresentation } from './co-creator-presentation.js';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
+import { runWithNativeTurnAuth } from './native-turn-auth.js';
 import type { FamilyToolDefinition, McpServerFamily } from './tool-governance-snapshot.js';
-import {
-  callbackPost,
-  getCallbackConfig,
-  type PostMessageRegistrationPrincipal,
-  projectPostMessageInputSchema,
-} from './tools/callback-tools.js';
+import { protectToolResponse } from './tool-response-budget.js';
+import { type PostMessageRegistrationPrincipal, projectPostMessageInputSchema } from './tools/callback-tools.js';
 import { getInvocationAuthSignal } from './tools/invocation-auth.js';
 
 export { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
@@ -27,10 +25,9 @@ export const DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS = derivedProfileSet(
   'desktop:cloud-pro-phase0',
 );
 
-const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0']);
+const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0', 'live-companion']);
 
 export interface ToolsetEnv {
-  participation?: boolean;
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
@@ -49,11 +46,14 @@ export interface ToolsetEnv {
  * tests may pass a fixture env to avoid module-cache games.
  */
 export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEnv {
-  if (env.CAT_CAFE_MCP_PROFILE && env.CAT_CAFE_MCP_PROFILE !== 'collective-participation')
-    throw new Error('Unknown CAT_CAFE_MCP_PROFILE');
+  if (env.CAT_CAFE_MCP_PROFILE) throw new Error('Unknown CAT_CAFE_MCP_PROFILE');
   const desktopMode = env.CAT_CAFE_DESKTOP_MODE?.trim();
+  if (
+    desktopMode === 'live-companion' &&
+    (!env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE || !env.CAT_CAFE_NATIVE_CONNECTION_ID)
+  )
+    throw new Error('Live companion requires native invocation binding');
   return {
-    participation: env.CAT_CAFE_MCP_PROFILE === 'collective-participation',
     readonly: env.CAT_CAFE_READONLY === 'true',
     // Credential USABILITY, not env presence (#1494): a '{}' variant map, bad
     // JSON, a blank secret, or a path to a missing sidecar resolve zero keys
@@ -68,8 +68,8 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
 /**
  * Filter a list of tools by the current ToolsetEnv.
  *
- * Precedence (V3, codex APPROVE):
- *   1. desktopMode highest — NOT union with READONLY/AGENT_KEY whitelists.
+ * Precedence:
+ *   1. desktopMode — NOT union with READONLY/AGENT_KEY whitelists.
  *      Unknown value → throw (fail-fast on server startup).
  *   2. !readonly → return all tools unchanged.
  *   3. readonly → READONLY_ALLOWED_TOOLS, plus AGENT_KEY_TOOLS only when the
@@ -81,10 +81,6 @@ export function applyReadonlyFilter<T extends { name: string }>(
   tools: readonly T[],
   env: ToolsetEnv = parseToolsetEnv(),
 ): readonly T[] {
-  if (env.participation) {
-    const allowed = derivedProfileSet(CANONICAL_TOOL_REGISTRY, 'collective-participation');
-    return tools.filter((tool) => allowed.has(tool.name));
-  }
   if (env.desktopMode) {
     if (!KNOWN_DESKTOP_MODES.has(env.desktopMode)) {
       throw new Error(
@@ -93,6 +89,10 @@ export function applyReadonlyFilter<T extends { name: string }>(
     }
     if (env.desktopMode === 'fable-phase0') {
       return tools.filter((t) => DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.has(t.name));
+    }
+    if (env.desktopMode === 'live-companion') {
+      const allowed = derivedProfileSet(CANONICAL_TOOL_REGISTRY, 'desktop:live-companion');
+      return tools.filter((tool) => allowed.has(tool.name));
     }
     if (env.desktopMode === 'cloud-pro-phase0') {
       // Cloud profile derives its own bounded read/message surface from the registry.
@@ -137,7 +137,7 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Readonly<Record<string, ToolDef['annotat
 
 type RegisteredToolHandler = (
   args: never,
-  extra: { signal: AbortSignal },
+  extra: { signal: AbortSignal; _meta?: unknown },
 ) => Promise<{
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
@@ -168,51 +168,8 @@ export function projectSchemaDeliveryMeta(definition: Pick<ToolDef, 'policy'>): 
   return definition.policy.schemaDelivery.policy === 'always-visible' ? { 'anthropic/alwaysLoad': true } : undefined;
 }
 
-// ── F254 Phase B1: In-memory freshness notice state (per MCP server process = per invocation) ──
-const freshnessNoticeState = { toolCallCount: 0, noticeDeliveredCount: 0, lastNoticeToolCallNum: 0 };
-const FRESHNESS_NOTICE_INTERVAL = 5;
-const FRESHNESS_MAX_NOTICES = 3;
-
-/**
- * F254 B1: Check if a freshness notice should be piggybacked on this tool result.
- * Frequency-gated in-memory (every 5 read-only calls, max 3 per invocation).
- * Only calls the API when the gate passes — minimizes HTTP overhead.
- */
-async function maybeFreshnessNotice(toolName: string, isReadOnly: boolean): Promise<string | null> {
-  freshnessNoticeState.toolCallCount++;
-
-  if (!isReadOnly) return null;
-  if (freshnessNoticeState.noticeDeliveredCount >= FRESHNESS_MAX_NOTICES) return null;
-  if (freshnessNoticeState.toolCallCount - freshnessNoticeState.lastNoticeToolCallNum < FRESHNESS_NOTICE_INTERVAL) {
-    return null;
-  }
-
-  // Gate passed — call API to check for unseen messages
-  if (!getCallbackConfig()) return null;
-
-  try {
-    const result = await callbackPost('/api/callbacks/freshness-notice-check', {
-      toolName,
-      isReadOnly: true,
-    });
-    if (result.isError) return null;
-
-    const data = JSON.parse((result.content[0] as { text: string }).text);
-    // Advance interval counter after ANY API call, not just successful delivery.
-    // Otherwise quiet threads (no unseen) bypass the interval gate on every call.
-    // (Cloud review R2 P2-R2-2)
-    freshnessNoticeState.lastNoticeToolCallNum = freshnessNoticeState.toolCallCount;
-    if (data?.notice?.text) {
-      freshnessNoticeState.noticeDeliveredCount++;
-      return data.notice.text;
-    }
-  } catch {
-    // Fail-open: notice errors never block tool execution
-  }
-  return null;
-}
-
 function resolvePostMessageRegistrationPrincipal(env: ToolsetEnv): PostMessageRegistrationPrincipal {
+  if (process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) return 'invocation';
   if (getInvocationAuthSignal().hasFullCredentials) return 'invocation';
   if (env.hasAgentKey) return 'agent-key';
   return 'unconfigured';
@@ -226,12 +183,11 @@ function projectRegistrationContract(tool: ToolDef, principal: PostMessageRegist
       ? projectAgentKeyCollaborationContract(tool.name, canonicalSchema, tool.description)
       : undefined;
   const schema = agentContract?.inputSchema ?? canonicalSchema;
-  // Callback tools use Zod raw shapes; limb tools use plain JSON Schema.
   let inputSchema =
     typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
       ? jsonSchemaToZod(schema)
       : z.object(schema as z.ZodRawShape);
-  if ((isPostMessage && principal === 'invocation') || agentContract) {
+  if ((isPostMessage && principal === 'invocation') || agentContract || tool.name === 'cat_cafe_get_recall_metrics') {
     // Reject unsupported fields before default Zod stripping erases their evidence.
     inputSchema = (inputSchema as z.ZodObject<z.ZodRawShape>).strict();
   }
@@ -248,41 +204,35 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
     name: string,
     config: RegisterToolConfig,
     cb: RegisteredToolHandler,
-  ) => void;
+  ) => RegisteredTool;
   const principal = resolvePostMessageRegistrationPrincipal(env);
   for (const tool of tools) {
     const annotations = tool.annotations;
     const deliveryMeta = projectSchemaDeliveryMeta(tool);
-    registerExplicit(
+    const registered = registerExplicit(
       tool.name,
       {
         ...projectRegistrationContract(tool, principal),
         annotations,
         ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
       },
-      async (args: never, extra: { signal: AbortSignal }) => {
-        const result = tool.implementation.runWithExtra
-          ? await tool.implementation.runWithExtra(args, { signal: extra.signal })
-          : await tool.handler(args);
-        const typed = {
-          ...(result as Record<string, unknown>),
-        } as {
-          content: Array<{ type: 'text'; text: string }>;
-          isError?: boolean;
-          [key: string]: unknown;
-        };
+      async (args: never, extra: { signal: AbortSignal; _meta?: unknown }) =>
+        runWithNativeTurnAuth(extra._meta, extra.signal, async () => {
+          const result = tool.implementation.runWithExtra
+            ? await tool.implementation.runWithExtra(args, { signal: extra.signal })
+            : await tool.handler(args);
+          const typed = {
+            ...(result as Record<string, unknown>),
+          } as {
+            content: Array<{ type: 'text'; text: string }>;
+            isError?: boolean;
+            [key: string]: unknown;
+          };
 
-        // F254 B1: Piggyback freshness notice on successful read-only tool results
-        if (!typed.isError && annotations.readOnlyHint) {
-          const noticeText = await maybeFreshnessNotice(tool.name, annotations.readOnlyHint);
-          if (noticeText) {
-            typed.content = [...typed.content, { type: 'text', text: `\n\n${noticeText}` }];
-          }
-        }
-
-        return typed;
-      },
+          return protectToolResponse(tool.name, typed, annotations.readOnlyHint);
+        }),
     );
+    registerCoCreatorPresentation(server, tool.name, registered);
   }
 }
 
@@ -317,7 +267,7 @@ export function buildLimbTools(env?: ToolsetEnv): readonly ToolDef[] {
   // full limb surface in standalone limb.ts entry. Antigravity / default
   // (no desktopMode set) keeps the F061 contract: limb fully exposed,
   // not filtered by readonly.
-  if (e.desktopMode || e.participation) {
+  if (e.desktopMode) {
     return buildFamilyTools('limb', e);
   }
   return CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === 'limb');

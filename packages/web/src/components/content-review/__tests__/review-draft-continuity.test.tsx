@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ReviewComments } from '../ReviewComments';
 import { ReviewReply } from '../ReviewReply';
+import { ReviewRoundDecision } from '../ReviewRoundDecision';
 import { startReviewReanchor } from '../startReviewReanchor';
 
 vi.mock('../ReviewActor', () => ({ ReviewActor: () => createElement('span', null, 'You') }));
@@ -120,11 +121,86 @@ it('reanchoring never replaces an existing new-version draft, even if it is from
   expect(startReviewReanchor('round:2', draft)).toBe('created');
   expect(JSON.parse(localStorage.getItem('round:2') ?? '{}')).toEqual(draft);
 });
+it('a new-version draft the reader emptied no longer blocks reanchoring', () => {
+  const draft = { body: '旧版意见', anchor: null, reanchoredFrom: { round: 1, annotationId: 'mark' } };
+  // The shared composer clears by emptying its text; the stored draft then protects nothing.
+  for (const emptied of [
+    { body: '', anchor: null },
+    { body: '  \n', anchor: null },
+  ]) {
+    localStorage.setItem('round:2', JSON.stringify(emptied));
+    expect(startReviewReanchor('round:2', draft)).toBe('created');
+    expect(JSON.parse(localStorage.getItem('round:2') ?? '{}')).toEqual(draft);
+  }
+  // A pending reanchor seed or a chosen position is still something to keep.
+  for (const kept of [
+    { body: '', anchor: null, reanchoredFrom: { round: 1, annotationId: 'other' } },
+    { body: '', anchor: { kind: 'image-region', x: 1, y: 1, width: 2, height: 2 } },
+    { body: '', anchor: null, futureField: true },
+  ]) {
+    const saved = JSON.stringify(kept);
+    localStorage.setItem('round:2', saved);
+    expect(startReviewReanchor('round:2', draft)).toBe('existing');
+    expect(localStorage.getItem('round:2')).toBe(saved);
+  }
+  localStorage.removeItem('round:2');
+});
 it('a browser storage failure leaves the source annotation available for a retry', () => {
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new Error('quota');
   });
   expect(startReviewReanchor('round:2', { body: '旧版意见', anchor: null })).toBe('unavailable');
+});
+
+it.each(['reply', 'decision'])('a late %s callback preserves the next draft at the same key', async (kind) => {
+  let resolveSave: (ok: boolean) => void = () => {};
+  const save = () =>
+    new Promise<boolean>((resolve) => {
+      resolveSave = resolve;
+    });
+  const key = `late-${kind}`;
+  await act(async () =>
+    root.render(
+      kind === 'reply'
+        ? createElement(ReviewReply, {
+            reply: {
+              id: 'reply',
+              author: { kind: 'human', actorId: 'operator' },
+              body: '已保存的回复',
+              createdAt: '2026-09-07T14:00:00Z',
+              updatedAt: '2026-09-07T14:00:00Z',
+            },
+            ownerUserId: 'operator',
+            canEdit: true,
+            saving: false,
+            draftKey: key,
+            onSave: save,
+          })
+        : createElement(ReviewRoundDecision, {
+            round,
+            ownerUserId: 'operator',
+            canWrite: true,
+            saving: false,
+            draftKey: key,
+            act: save,
+          }),
+    ),
+  );
+  if (kind === 'reply') await click('修改回复');
+  const label = kind === 'reply' ? '修改自己的回复' : '审阅结论说明';
+  await type('原先提交的内容', label);
+  if (kind === 'reply') {
+    await act(async () =>
+      container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+  } else {
+    await click('要求修改');
+  }
+  await type('提交以后写的新内容', label);
+  await act(async () => resolveSave(true));
+  expect(JSON.parse(localStorage.getItem(key) ?? '{}').body).toBe('提交以后写的新内容');
+  if (kind === 'reply') await click('修改回复');
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('提交以后写的新内容');
 });
 
 it('moves from a canvas mark into its real discussion and lets Escape return to that mark', async () => {

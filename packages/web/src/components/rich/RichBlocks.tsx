@@ -2,6 +2,9 @@
 
 import { type ConnectorSource, isPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
 import { useState } from 'react';
+import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
+import { isCorrectionPublication } from '@/components/memory/page/read-correction-approval';
+import { useShellCopy } from '@/components/shell/shell-copy';
 import { TransferTargetPicker } from '@/components/TransferTargetPicker';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
 import { AudioBlock } from './AudioBlock';
@@ -11,17 +14,27 @@ import { ChecklistBlock } from './ChecklistBlock';
 import { CommunityIssueDraftCard, isCommunityIssueDraftBlock } from './CommunityIssueDraftCard';
 import { CommunityIssuePreviewCard, isCommunityIssuePreviewBlock } from './CommunityIssuePreviewCard';
 import { DiffBlock } from './DiffBlock';
+import { isEvalRepairPublication } from './eval-repair-model';
 import { FileBlock } from './FileBlock';
 import { FrustrationIssueCard, isFrustrationIssueCardBlock } from './FrustrationIssueCard';
+import { frustrationHistoryCopy } from './frustration-history.shell-copy';
+import { trustedFrustrationMeta, useFrustrationVisibility, visibleFrustrationBlocks } from './frustration-visibility';
 import { HandoffProposalCard, isHandoffProposalCardBlock } from './HandoffProposalCard';
 import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
+import { LivingWorkCard } from './LivingWorkCard';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
+import { OriginalDomainApprovalCard } from './OriginalDomainApprovalCard';
+import { OriginalEvalRepairCard } from './OriginalEvalRepairCard';
+import { OriginalMemoryCorrectionCard } from './OriginalMemoryCorrectionCard';
 import { PersonMemoryProposalCard } from './PersonMemoryProposalCard';
 import { isProposalCardBlock, ProposalCard } from './ProposalCard';
 import { RichBlockForwardButton } from './RichBlockForwardButton';
+import { RuntimeConversationCard } from './RuntimeConversationCard';
 import { isRuntimeInteractionCardBlock, RuntimeInteractionCard } from './RuntimeInteractionCard';
+import { isDomainApprovalPublication } from './read-domain-approval-source';
+import type { RuntimeConversationBinding } from './runtime-conversation-model';
 import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
 
 const RICH_BLOCK_OVERLAY_ACTIONS_CLASS =
@@ -75,24 +88,31 @@ function RichCardRenderer({
   messageId,
   messageSource,
   confirmations,
+  publication,
 }: {
   block: Extract<RichBlock, { kind: 'card' }>;
   messageId?: string;
   messageSource?: ConnectorSource;
   confirmations?: CardConfirmationEntry[];
+  publication?: PublishedMessageCoordinate;
 }) {
+  if (block.meta?.kind === 'work_reference') return <LivingWorkCard block={block} messageId={messageId} />;
+  if (isDomainApprovalPublication(block)) return <OriginalDomainApprovalCard block={block} coordinate={publication} />;
+  if (isCorrectionPublication(block)) return <OriginalMemoryCorrectionCard block={block} coordinate={publication} />;
+  if (isEvalRepairPublication(block)) return <OriginalEvalRepairCard block={block} coordinate={publication} />;
   if (isPersonMemoryProposalCardBlock(block)) {
-    return <PersonMemoryProposalCard block={block} messageId={messageId} />;
+    return <PersonMemoryProposalCard block={block} messageId={messageId} coordinate={publication} />;
   }
   if (isRuntimeInteractionCardBlock(block)) {
     return <RuntimeInteractionCard block={block} messageId={messageId} />;
   }
-  if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
+  if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} coordinate={publication} />;
   if (isHandoffProposalCardBlock(block)) return <HandoffProposalCard block={block} messageId={messageId} />;
   if (isScheduleMutationProposalCardBlock(block)) {
-    return <ScheduleMutationProposalCard block={block} messageId={messageId} />;
+    return <ScheduleMutationProposalCard block={block} coordinate={publication} messageId={messageId} />;
   }
   if (isFrustrationIssueCardBlock(block, messageSource)) {
+    if (!trustedFrustrationMeta(block, messageSource?.connector)?.signal) return <UnknownFrustrationCard />;
     return <FrustrationIssueCard block={block} messageId={messageId} />;
   }
   if (isCommunityIssuePreviewBlock(block, messageSource)) {
@@ -107,23 +127,36 @@ function RichCardRenderer({
   return <CardBlock block={block} messageId={messageId} confirmations={confirmations} />;
 }
 
+function UnknownFrustrationCard() {
+  const t = useShellCopy(frustrationHistoryCopy);
+  return <p className="text-xs text-cafe-muted">{t.unknown}</p>;
+}
+
 function RichBlockRenderer({
   block,
+  publication,
   catId,
   messageId,
+  sourceThreadId,
+  sourceMessageIds,
   messageSource,
   confirmations,
   sendContext,
   htmlWidgetDisclosureKeys,
+  runtimeInteractionCard,
 }: {
   block: RichBlock;
+  publication?: PublishedMessageCoordinate;
   catId?: string;
   messageId?: string;
+  sourceThreadId?: string;
+  sourceMessageIds?: readonly string[];
   messageSource?: ConnectorSource;
   confirmations?: CardConfirmationEntry[];
   /** F229 Bug 2 fix: propagated to InteractiveBlock to tag interactive-send events */
   sendContext?: string;
   htmlWidgetDisclosureKeys?: Readonly<Record<string, string>>;
+  runtimeInteractionCard?: RuntimeConversationBinding;
 }) {
   switch (block.kind) {
     case 'card':
@@ -133,6 +166,7 @@ function RichBlockRenderer({
           messageId={messageId}
           messageSource={messageSource}
           confirmations={confirmations}
+          publication={publication}
         />
       );
     case 'diff':
@@ -140,15 +174,33 @@ function RichBlockRenderer({
     case 'checklist':
       return <ChecklistBlock block={block} />;
     case 'media_gallery':
-      return <MediaGalleryBlock block={block} />;
+      return <MediaGalleryBlock block={block} publication={publication} />;
     case 'audio':
       return <AudioBlock block={block} catId={catId} />;
     case 'interactive':
+      if (runtimeInteractionCard?.requestKind === 'conversation_decision')
+        return (
+          <RuntimeConversationCard
+            block={block}
+            binding={runtimeInteractionCard}
+            messageId={messageId}
+            sourceThreadId={sourceThreadId}
+            catId={catId}
+          />
+        );
       return <InteractiveBlock block={block} messageId={messageId} sendContext={sendContext} />;
     case 'html_widget':
       return <HtmlWidgetBlock block={block} disclosureKey={htmlWidgetDisclosureKeys?.[block.id]} />;
     case 'file':
-      return <FileBlock block={block} />;
+      return (
+        <FileBlock
+          block={block}
+          publication={publication}
+          messageId={messageId}
+          sourceThreadId={sourceThreadId}
+          sourceMessageIds={sourceMessageIds}
+        />
+      );
     default:
       return (
         <div className="rounded-lg border border-cafe px-3 py-2 text-xs text-cafe-muted">
@@ -193,15 +245,21 @@ function ReadOnlyRichBlockRenderer({ block }: { block: RichBlock }) {
   return <RichBlockRenderer block={block} />;
 }
 
-type GroupedItem = { grouped: true; groupId: string; blocks: RichInteractiveBlock[] };
-type ResultItem = RichBlock | GroupedItem;
+type BlockItem = { type: 'block'; block: RichBlock };
+type GroupedItem = { type: 'group'; groupId: string; blocks: RichInteractiveBlock[] };
+type ResultItem = BlockItem | GroupedItem;
+
+/** Render decisions belong to local envelopes, never extra fields on source blocks. */
+function blockItem(block: RichBlock): BlockItem {
+  return { type: 'block', block };
+}
 
 /** Find runs of consecutive ungrouped interactive blocks (no non-interactive gaps) */
 function findConsecutiveRuns(blocks: RichBlock[]): RichInteractiveBlock[][] {
   const runs: RichInteractiveBlock[][] = [];
   let current: RichInteractiveBlock[] = [];
   for (const block of blocks) {
-    if (block.kind === 'interactive' && !block.groupId) {
+    if (block.kind === 'interactive' && !block.groupId && block.autoGroup !== false) {
       current.push(block);
     } else {
       if (current.length > 0) {
@@ -257,16 +315,16 @@ function groupBlocks(blocks: RichBlock[]): ResultItem[] {
     if (block.kind === 'interactive' && block.groupId) {
       const gid = block.groupId;
       if (groupFirstIdx.get(gid) === i) {
-        result.push({ grouped: true, groupId: gid, blocks: groupMap.get(gid)! });
+        result.push({ type: 'group', groupId: gid, blocks: groupMap.get(gid)! });
       }
     } else if (block.kind === 'interactive' && autoGroupIds.has(block.id)) {
       const gid = blockToGroup.get(block.id)!;
       if (!emittedGroups.has(gid)) {
-        result.push({ grouped: true, groupId: gid, blocks: syntheticGroups.get(gid)! });
+        result.push({ type: 'group', groupId: gid, blocks: syntheticGroups.get(gid)! });
         emittedGroups.add(gid);
       }
     } else {
-      result.push(block);
+      result.push(blockItem(block));
     }
   }
   return result;
@@ -274,6 +332,7 @@ function groupBlocks(blocks: RichBlock[]): ResultItem[] {
 
 export function RichBlocks({
   blocks,
+  publication,
   catId,
   messageId,
   sourceThreadId,
@@ -282,10 +341,12 @@ export function RichBlocks({
   confirmations,
   sendContext,
   htmlWidgetDisclosureKeys,
+  runtimeInteractionCard,
   readOnly = false,
   forwardingEnabled = true,
 }: {
   blocks: RichBlock[];
+  publication?: PublishedMessageCoordinate;
   catId?: string;
   messageId?: string;
   sourceThreadId?: string;
@@ -302,20 +363,23 @@ export function RichBlocks({
    *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
   sendContext?: string;
   htmlWidgetDisclosureKeys?: Readonly<Record<string, string>>;
+  runtimeInteractionCard?: RuntimeConversationBinding;
   /** Forwarded blocks are inert evidence: no callbacks, specialised actions, or HTML execution. */
   readOnly?: boolean;
   /** The source must be terminal and the browser document admitted before forwarding can begin. */
   forwardingEnabled?: boolean;
 }) {
   const [forwardBlockId, setForwardBlockId] = useState<string | null>(null);
-  if (blocks.length === 0) return null;
-  const items = readOnly ? blocks : groupBlocks(blocks);
-  const forwardBlock = forwardBlockId ? blocks.find((block) => block.id === forwardBlockId) : undefined;
+  const visibility = useFrustrationVisibility(blocks, readOnly ? undefined : messageSource?.connector);
+  const shownBlocks = readOnly ? blocks : visibleFrustrationBlocks(visibility);
+  if (shownBlocks.length === 0) return null;
+  const items = readOnly || runtimeInteractionCard ? shownBlocks.map(blockItem) : groupBlocks(shownBlocks);
+  const forwardBlock = forwardBlockId ? shownBlocks.find((block) => block.id === forwardBlockId) : undefined;
   return (
     <>
       <div className="mt-2 space-y-2">
         {items.map((item) =>
-          'grouped' in item ? (
+          item.type === 'group' ? (
             <div key={item.groupId} data-rich-block-group-id={item.groupId} className="group/rich-block relative">
               <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
               {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
@@ -323,24 +387,28 @@ export function RichBlocks({
               ) : null}
             </div>
           ) : (
-            <div key={item.id} data-rich-block-id={item.id} className="group/rich-block relative">
+            <div key={item.block.id} data-rich-block-id={item.block.id} className="group/rich-block relative">
               {readOnly ? (
-                <ReadOnlyRichBlockRenderer block={item} />
+                <ReadOnlyRichBlockRenderer block={item.block} />
               ) : (
                 <RichBlockRenderer
-                  block={item}
+                  block={item.block}
+                  publication={publication}
                   catId={catId}
                   messageId={messageId}
+                  sourceThreadId={sourceThreadId}
+                  sourceMessageIds={sourceMessageIds}
                   messageSource={messageSource}
                   confirmations={confirmations}
                   sendContext={sendContext}
+                  runtimeInteractionCard={runtimeInteractionCard}
                   htmlWidgetDisclosureKeys={htmlWidgetDisclosureKeys}
                 />
               )}
               {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
                 <RichBlockForwardActions
-                  blocks={[item]}
-                  layout={item.kind === 'file' ? 'flow' : 'overlay'}
+                  blocks={[item.block]}
+                  layout={['file', 'card', 'interactive'].includes(item.block.kind) ? 'flow' : 'overlay'}
                   onForward={setForwardBlockId}
                 />
               ) : null}

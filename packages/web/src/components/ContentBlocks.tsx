@@ -1,10 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import type { MediaContextAttachment } from '@cat-cafe/shared';
 import type { MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { AuthenticatedMediaImage } from './AuthenticatedMediaImage';
 import { ContextAttachmentView } from './ContextAttachmentView';
-import { Lightbox } from './Lightbox';
+import { GalleryAttachmentGroup } from './content-review/GalleryAttachmentGroup';
+import { sameGalleryGroup } from './content-review/media-chat-selection';
+import { useChatArtworkLightbox } from './content-review/useChatArtworkLightbox';
+import type { PublishedMessageCoordinate } from './content-review/usePublishedContent';
 import { MarkdownContent } from './MarkdownContent';
 
 function formatFileSize(bytes: number): string {
@@ -23,35 +27,84 @@ function fileIcon(mimeType: string): string {
   return '📎';
 }
 
-function resolveUrl(url: string): string {
-  if (url.startsWith('/uploads/')) return `${API_URL}${url}`;
+function resolveUrl(url: string, isV2: boolean): string {
+  if (url.startsWith('/uploads/') || (isV2 && url.startsWith('/api/workspace/file/raw?'))) return `${API_URL}${url}`;
   return url;
 }
 
-export function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+export function ContentBlocks({
+  blocks,
+  publication,
+  fallbackText,
+}: {
+  blocks: MessageContent[];
+  publication?: PublishedMessageCoordinate;
+  /** Callback posts store their spoken body separately from attachment-only blocks. */
+  fallbackText?: string;
+}) {
+  const published = useChatArtworkLightbox(publication);
+  let fileQuoteNumber = 0;
+  const renderedGalleryAttachments = new Set<string>();
   return (
     <>
+      {fallbackText?.trim() && !blocks.some((block) => block.type === 'text') ? (
+        <MarkdownContent content={fallbackText} />
+      ) : null}
       {blocks.map((block, i) => {
         if (block.type === 'text') {
           return <MarkdownContent key={i} content={block.text} />;
         }
         if (block.type === 'image') {
-          const src = resolveUrl(block.url);
+          const source = published.source(block.url, { kind: 'content-block', index: i });
           return (
-            // biome-ignore lint/performance/noImgElement: uploaded images cannot use next/image
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <AuthenticatedMediaImage
+              url={resolveUrl(block.url, published.isV2)}
+              alt="附件"
               key={i}
-              src={src}
-              alt="attached image"
-              className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
-              onClick={() => setLightboxSrc(src)}
+              className="block max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe hover:opacity-90 transition-opacity"
+              onOpen={
+                published.busy
+                  ? undefined
+                  : (src) => {
+                      void published.enlarge({
+                        url: src,
+                        title: '图片',
+                        alt: 'attached image',
+                        mediaType: 'image',
+                        entry: source,
+                        item: { kind: 'content-block', index: i },
+                      });
+                    }
+              }
             />
           );
         }
         if (block.type === 'file') {
-          const src = resolveUrl(block.url);
+          const src = resolveUrl(block.url, published.isV2);
+          const source = published.source(block.url, { kind: 'content-block', index: i });
+          if (source || (published.isV2 && block.mimeType.startsWith('video/')))
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={published.busy}
+                onClick={() =>
+                  void published.enlarge({
+                    url: src,
+                    title: block.fileName,
+                    alt: block.fileName,
+                    mediaType: block.mimeType.startsWith('video/') ? 'video' : 'image',
+                    entry: source,
+                    item: { kind: 'content-block', index: i },
+                  })
+                }
+                className="mt-2 flex max-w-sm items-center gap-2 rounded-lg border border-cafe bg-cafe-surface px-3 py-2 text-left hover:border-cafe-accent"
+              >
+                <span aria-hidden="true">{fileIcon(block.mimeType)}</span>
+                <span className="min-w-0 truncate">{block.fileName}</span>
+                <span className="shrink-0 text-xs text-cafe-muted">{source ? '打开作品' : '查看视频'}</span>
+              </button>
+            );
           return (
             <a
               key={i}
@@ -71,11 +124,41 @@ export function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
           );
         }
         if (block.type === 'context_attachment') {
-          return <ContextAttachmentView key={block.attachment.id} attachment={block.attachment} />;
+          const attachment = block.attachment;
+          if (attachment.kind === 'media' && attachment.gallery) {
+            if (renderedGalleryAttachments.has(attachment.id)) return null;
+            const group = blocks.flatMap((item) =>
+              item.type === 'context_attachment' &&
+              item.attachment.kind === 'media' &&
+              item.attachment.gallery &&
+              sameGalleryGroup(attachment.gallery!, item.attachment.gallery)
+                ? [item.attachment]
+                : [],
+            ) satisfies MediaContextAttachment[];
+            for (const member of group) renderedGalleryAttachments.add(member.id);
+            return <GalleryAttachmentGroup key={attachment.id} attachments={group} />;
+          }
+          const quoteNumber =
+            block.attachment.kind === 'quote' && block.attachment.source.kind === 'workspace_file'
+              ? ++fileQuoteNumber
+              : undefined;
+          return (
+            <ContextAttachmentView key={block.attachment.id} attachment={block.attachment} quoteNumber={quoteNumber} />
+          );
         }
         return null;
       })}
-      {lightboxSrc && <Lightbox url={lightboxSrc} alt="attached image" onClose={() => setLightboxSrc(null)} />}
+      {published.busy ? (
+        <p role="status" className="text-xs text-cafe-muted">
+          正在打开作品…
+        </p>
+      ) : null}
+      {published.error ? (
+        <p role="alert" className="text-xs text-cafe-error">
+          {published.error}
+        </p>
+      ) : null}
+      {published.lightbox}
     </>
   );
 }

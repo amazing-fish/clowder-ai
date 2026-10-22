@@ -2,6 +2,7 @@ import { type Capability, type PluginManifest } from '@clowder-ai/plugin-contrac
 import {
   canonicalCapabilities,
   DEFAULT_PLUGIN_CONTRACT_RUNTIME,
+  isManifestContractSupported,
   requestedCapabilitiesForManifest,
 } from './contract-policy.js';
 import { isCanonicalPackageDigest } from './snapshot.js';
@@ -11,7 +12,7 @@ import { PluginInventoryError } from './types.js';
 export { PLUGIN_CONTRACT_VERSION } from './contract-policy.js';
 
 export interface VerifiedPackageAdmission {
-  readonly package: PluginPackageRecord;
+  readonly package: PluginPackageRecord & { readonly manifest: PluginManifest };
   readonly effectiveGrants: readonly Capability[];
   readonly requestedCapabilities: readonly Capability[];
 }
@@ -24,8 +25,8 @@ export type PackageManifestValidationResult =
     };
 
 export interface PackageAdmissionContractRuntime {
-  /** Exact contractVersion allowlist accepted by this Host composition. */
-  readonly manifestContractVersions: readonly string[];
+  /** Protocol compatibility range, independent of a plugin's installed SDK package. */
+  readonly manifestContractRange: string;
   readonly validateManifest: (value: unknown) => PackageManifestValidationResult;
   readonly validateEffectiveGrants: (values: readonly string[]) => boolean;
 }
@@ -52,10 +53,10 @@ export function verifyPackageAdmission(
   if (validation.manifest.pluginId !== candidate.packagePluginId) {
     throw new PluginInventoryError('PACKAGE_ID_MISMATCH', 'package identity does not match manifest pluginId');
   }
-  if (!contract.manifestContractVersions.includes(validation.manifest.contractVersion)) {
+  if (!isManifestContractSupported(validation.manifest.contractVersion, contract.manifestContractRange)) {
     throw new PluginInventoryError(
       'CONTRACT_VERSION_MISMATCH',
-      `manifest requires ${validation.manifest.contractVersion}; Host admits ${contract.manifestContractVersions.join(', ')}`,
+      `manifest requires ${validation.manifest.contractVersion}; Host supports ${contract.manifestContractRange}`,
     );
   }
   if (!contract.validateEffectiveGrants(candidate.effectiveGrants)) {

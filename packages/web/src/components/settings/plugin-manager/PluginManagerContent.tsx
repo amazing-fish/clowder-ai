@@ -1,16 +1,52 @@
 'use client';
 
 import { pluginDescriptionVariants } from '@cat-cafe/shared';
-import { useEffect, useMemo, useState } from 'react';
-import { ConnectorPluginInstallButton } from '../../ConnectorPluginInstallButton';
+import type { ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
+import { SettingsPageHeader, type SettingsPageHeaderProps } from '../SettingsPageHeader';
+import { PluginArchiveInstallButton } from './PluginArchiveInstallButton';
+import { PluginDirectoryInstallButton } from './PluginDirectoryInstallButton';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
 import { PluginListRow, PluginListSection } from './PluginManagerList';
+import { PluginMarketplaceSettings } from './PluginMarketplaceSettings';
+import { installedPluginGroups, type PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
-const DEFAULT_RECOMMENDATION_LIMIT = 3;
+function PluginManagerToolbar({
+  onMarketplaceChange,
+  onDirectoryInstall,
+  onArchiveInstalled,
+}: {
+  onMarketplaceChange?: (() => Promise<void>) | undefined;
+  onDirectoryInstall?: ((path: string) => Promise<void>) | undefined;
+  onArchiveInstalled?: (() => void | Promise<void>) | undefined;
+}) {
+  return (
+    <div data-plugin-manager-toolbar className="flex flex-wrap items-start justify-end gap-2">
+      <a
+        href="/docs/plugin-development.md"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="console-inline-link pt-1.5 text-xs"
+      >
+        插件开发文档
+      </a>
+      {onDirectoryInstall && <PluginDirectoryInstallButton onInstall={onDirectoryInstall} />}
+      {onArchiveInstalled && <PluginArchiveInstallButton label="从安装包安装" onInstalled={onArchiveInstalled} />}
+      <PluginMarketplaceSettings onChange={onMarketplaceChange} />
+    </div>
+  );
+}
+
+function blockedEnableReason(plugin: PluginManagerDesignFixture) {
+  if (plugin.id !== 'official.chatgpt-dot') return '请先完成右侧配置或连接，再启用。';
+  return plugin.auth === 'connected'
+    ? '还在等待 dot 读原文并回帖；两处都完成后才能开启。'
+    : '请先完成订阅和两处往返验证，再启用 dot。';
+}
 
 function PluginManagerError({ message }: { message: string | null | undefined }) {
   if (!message) return null;
@@ -60,57 +96,85 @@ function usePluginSelection(
 
 export function PluginManagerContent({
   fixtures,
+  pageHeader,
   catalogStatus = 'fresh',
   catalogMessage,
   loading = false,
   error,
   busyPluginId = null,
   selectedPluginId,
+  linkedPluginId = null,
+  initialDetailPluginId,
+  onOperationChange,
+  presentation = 'v1',
   onPluginSelect,
   onSearchChange,
   onInstall,
+  onMarketplaceChange,
+  onDirectoryInstall,
   onSetEnabled,
+  onRequestEnable,
   onUninstall,
   onConfigure,
   configurationSavedPluginId = null,
+  onStateChanged,
   locale = 'zh-CN',
+  renderCompatibilityDetail,
 }: {
   fixtures: readonly PluginManagerDesignFixture[];
+  pageHeader?: Omit<SettingsPageHeaderProps, 'children'>;
   catalogStatus?: 'fresh' | 'stale' | 'degraded' | 'unavailable';
   catalogMessage?: string;
   loading?: boolean;
   error?: string | null;
   busyPluginId?: string | null;
   selectedPluginId?: string | null;
+  linkedPluginId?: string | null;
+  initialDetailPluginId?: string | null;
+  onOperationChange?: (pluginId: string) => void;
+  presentation?: PluginManagerPresentation;
   onPluginSelect?: (pluginId: string | null) => void;
   onSearchChange?: (query: string) => void;
   onInstall?: (pluginId: string) => void;
+  onMarketplaceChange?: () => Promise<void>;
+  onDirectoryInstall?: (path: string) => Promise<void>;
   onSetEnabled?: (pluginId: string, enabled: boolean) => void;
+  onRequestEnable?: (pluginId: string) => void | Promise<void>;
   onUninstall?: (pluginId: string) => void;
   onConfigure?: (pluginId: string, updates: readonly { key: string; value: string | null }[]) => void;
   configurationSavedPluginId?: string | null;
+  onStateChanged?: () => void | Promise<void>;
   locale?: string;
+  renderCompatibilityDetail?: (pluginId: string, plugin: PluginManagerDesignFixture) => ReactNode | undefined;
 }) {
+  const initialDetailOpened = useRef(false);
   const [query, setQuery] = useState('');
+  const [availableLimit, setAvailableLimit] = useState(5);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [configurationValidation, setConfigurationValidation] = useState({ pluginId: '', request: 0 });
 
   const filtered = useMemo(() => fixtures.filter((plugin) => matchesSearch(plugin, query)), [fixtures, query]);
-  const installedPlugins = filtered.filter((plugin) => plugin.artifact === 'installed');
+  const leadingGroups = installedPluginGroups(filtered, presentation);
   const recommendationPool = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source === 'catalog');
-  const recommendedPlugins =
-    query.trim().length > 0 ? recommendationPool : recommendationPool.slice(0, DEFAULT_RECOMMENDATION_LIMIT);
-  const attentionPlugins = filtered.filter((plugin) => plugin.artifact !== 'installed' && plugin.artifact !== 'absent');
+  const recommendedPlugins = query.trim() ? recommendationPool : recommendationPool.slice(0, availableLimit);
+  const hasMore = !query.trim() && recommendedPlugins.length < recommendationPool.length;
   const otherPlugins = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source !== 'catalog');
-  const visible = [...installedPlugins, ...attentionPlugins, ...recommendedPlugins, ...otherPlugins];
+  const visible = [...leadingGroups.flatMap((group) => group.plugins), ...recommendationPool, ...otherPlugins];
   const selection = usePluginSelection(visible, selectedPluginId, onPluginSelect);
   const selected = selection.selected;
+  useEffect(() => {
+    if (!initialDetailOpened.current && selected && (initialDetailPluginId ?? linkedPluginId) === selected.id) {
+      initialDetailOpened.current = true;
+      setMobileDetailOpen(true);
+    }
+  }, [initialDetailPluginId, linkedPluginId, selected?.id]);
 
   const renderRows = (plugins: readonly PluginManagerDesignFixture[]) =>
     plugins.map((plugin) => (
       <PluginListRow
         key={plugin.id}
         plugin={plugin}
+        presentation={presentation}
         selected={plugin.id === selected?.id}
         locale={locale}
         onSelect={() => {
@@ -123,21 +187,36 @@ export function PluginManagerContent({
           selection.select(plugin.id);
           setMobileDetailOpen(true);
           setConfigurationValidation((current) => ({ pluginId: plugin.id, request: current.request + 1 }));
+          if (onRequestEnable) void onRequestEnable(plugin.id);
+          else void onStateChanged?.();
         }}
         onUninstall={() => onUninstall?.(plugin.id)}
         busy={busyPluginId === plugin.id}
+        enableBlockedReason={
+          configurationValidation.pluginId === plugin.id && plugin.actions?.setEnabled === false
+            ? blockedEnableReason(plugin)
+            : undefined
+        }
       />
     ));
 
   return (
     <section data-testid="plugin-manager" className="flex h-full min-h-0 flex-1 flex-col gap-3.5 overflow-hidden">
-      <div data-plugin-manager-toolbar className="flex justify-end">
-        <ConnectorPluginInstallButton
-          endpoint="/api/plugin-manager/plugins/install/upload"
-          label="离线安装"
-          docsHref={false}
+      {pageHeader ? (
+        <SettingsPageHeader {...pageHeader}>
+          <PluginManagerToolbar
+            onMarketplaceChange={onMarketplaceChange}
+            onDirectoryInstall={onDirectoryInstall}
+            onArchiveInstalled={onStateChanged}
+          />
+        </SettingsPageHeader>
+      ) : (
+        <PluginManagerToolbar
+          onMarketplaceChange={onMarketplaceChange}
+          onDirectoryInstall={onDirectoryInstall}
+          onArchiveInstalled={onStateChanged}
         />
-      </div>
+      )}
 
       {catalogStatus !== 'fresh' && (
         <div className="flex items-start gap-2 rounded-xl bg-conn-amber-bg px-3 py-2.5">
@@ -163,6 +242,7 @@ export function PluginManagerContent({
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
+                  setAvailableLimit(5);
                   onSearchChange?.(event.target.value);
                 }}
                 placeholder="搜索插件"
@@ -170,7 +250,16 @@ export function PluginManagerContent({
               />
             </label>
           </div>
-          <div data-plugin-scroll-region="list" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          {/* Keep absolute accessibility labels inside this scroll container's containing block. */}
+          <div
+            data-plugin-scroll-region="list"
+            className="relative min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
+            onScroll={(event) => {
+              const list = event.currentTarget;
+              if (hasMore && list.scrollHeight - list.scrollTop - list.clientHeight < 96)
+                setAvailableLimit((limit) => limit + 5);
+            }}
+          >
             {loading && (
               <div data-testid="plugin-manager-loading" className="space-y-2">
                 {[0, 1, 2].map((item) => (
@@ -187,24 +276,30 @@ export function PluginManagerContent({
             )}
             {!loading && (
               <>
-                <PluginListSection
-                  kind="installed"
-                  title="已安装"
-                  ariaLabel="已安装插件"
-                  rows={renderRows(installedPlugins)}
-                />
-                <PluginListSection
-                  kind="attention"
-                  title="需要处理"
-                  ariaLabel="需要处理的插件"
-                  rows={renderRows(attentionPlugins)}
-                />
+                {leadingGroups.map(({ kind, title, ariaLabel, plugins }) => (
+                  <PluginListSection
+                    key={kind}
+                    kind={kind}
+                    title={title}
+                    ariaLabel={ariaLabel}
+                    rows={renderRows(plugins)}
+                  />
+                ))}
                 <PluginListSection
                   kind="recommended"
                   title="推荐"
                   ariaLabel="推荐插件"
                   rows={renderRows(recommendedPlugins)}
                 />
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={() => setAvailableLimit((limit) => limit + 5)}
+                    className="console-inline-link w-full py-2 text-sm"
+                  >
+                    查看更多插件
+                  </button>
+                )}
                 <PluginListSection kind="other" title="其他" ariaLabel="其他插件" rows={renderRows(otherPlugins)} />
               </>
             )}
@@ -223,21 +318,29 @@ export function PluginManagerContent({
             <HubIcon name="arrow-left" className="h-4 w-4" />
             返回插件列表
           </button>
-          <div data-plugin-scroll-region="detail" className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div
+            data-plugin-scroll-region="detail"
+            className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+          >
             {selected ? (
-              <PluginManagerDetailCard
-                key={selected.id}
-                plugin={selected}
-                locale={locale}
-                busy={busyPluginId === selected.id}
-                configurationValidationRequest={
-                  configurationValidation.pluginId === selected.id ? configurationValidation.request : 0
-                }
-                configurationSaved={configurationSavedPluginId === selected.id}
-                onSaveConfig={
-                  selected.configFields?.length ? (updates) => onConfigure?.(selected.id, updates) : undefined
-                }
-              />
+              (renderCompatibilityDetail?.(selected.id, selected) ?? (
+                <PluginManagerDetailCard
+                  key={selected.id}
+                  plugin={selected}
+                  presentation={presentation}
+                  onOperationChange={() => onOperationChange?.(selected.id)}
+                  locale={locale}
+                  busy={busyPluginId === selected.id}
+                  configurationValidationRequest={
+                    configurationValidation.pluginId === selected.id ? configurationValidation.request : 0
+                  }
+                  configurationSaved={configurationSavedPluginId === selected.id}
+                  onStateChanged={onStateChanged}
+                  onSaveConfig={
+                    selected.configFields?.length ? (updates) => onConfigure?.(selected.id, updates) : undefined
+                  }
+                />
+              ))
             ) : loading ? (
               <div className={`${settingsResourceCardClass} min-h-48 animate-pulse`} />
             ) : (

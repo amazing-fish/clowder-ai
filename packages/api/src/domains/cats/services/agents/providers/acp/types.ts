@@ -55,6 +55,8 @@ export const ACP_METHODS = {
   authenticate: 'authenticate',
   sessionNew: 'session/new',
   sessionLoad: 'session/load',
+  sessionResume: 'session/resume',
+  sessionClose: 'session/close',
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel', // notification (no response)
   sessionSetMode: 'session/set_mode',
@@ -84,12 +86,14 @@ export interface AcpInitializeResult {
     version: string;
   };
   agentCapabilities: {
-    loadSession: boolean;
-    promptCapabilities?: {
-      image?: boolean;
-      audio?: boolean;
-      embeddedContext?: boolean;
+    loadSession?: boolean;
+    sessionCapabilities?: {
+      resume?: Record<string, unknown>;
+      list?: Record<string, unknown>;
+      close?: Record<string, unknown>;
     };
+    _meta?: Record<string, unknown>;
+    promptCapabilities?: AcpPromptCapabilities;
     mcpCapabilities?: {
       http?: boolean;
       sse?: boolean;
@@ -104,11 +108,18 @@ export interface AcpAuthMethod {
   _meta?: Record<string, unknown>;
 }
 
+export interface AcpPromptCapabilities {
+  image?: boolean;
+  audio?: boolean;
+  embeddedContext?: boolean;
+}
+
 // ─── Session ───────────────────────────────────────────────────
 
 export interface AcpNewSessionParams {
   cwd: string;
   mcpServers: AcpMcpServer[];
+  _meta?: Record<string, unknown>;
 }
 
 export interface AcpNewSessionResult {
@@ -178,11 +189,19 @@ export type AcpSessionUpdateType =
   | 'stream_idle_warning' // F149: injected by AcpClient.promptStream idle watchdog
   | 'stream_tool_wait_warning'; // tool_call pending — idle is expected, not a stall
 
+/** Tool result entries include nested content, diffs, terminals, or future extension blocks. */
+export interface AcpToolCallContent {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface AcpSessionUpdate {
   sessionId: string;
   update: {
     sessionUpdate: AcpSessionUpdateType;
-    content?: AcpContentBlock;
+    content?: AcpContentBlock | AcpToolCallContent[];
+    rawInput?: unknown;
+    rawOutput?: unknown;
     [key: string]: unknown;
   };
 }

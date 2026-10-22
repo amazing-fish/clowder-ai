@@ -2,19 +2,40 @@
 
 import type { RoutingContextReadModelV1 } from '@cat-cafe/shared';
 import { CatAvatar } from '@/components/CatAvatar';
+import { MemberCopyProvider } from '../members/editor-presentation';
+import { MemberRoutingHistory } from '../members/MemberRoutingHistory';
+import { memberSaveCopy } from '../members/member-save.shell-copy';
+import { useShellCopy } from '../shell/shell-copy';
 import { RoutingSignalControls } from './RoutingSignalControls';
 import { AvailabilityBadge, TeamEvidenceFold } from './TeamCandidatePresentation';
 import type { TeamCapabilityReading, TeamMemberRow } from './team-member-projection';
 
-function SignalList({ title, items, testId }: { title: string; items: readonly string[]; testId: string }) {
+const SIGNAL_DOT_CLASS: Record<'fit' | 'watch', string> = {
+  fit: 'text-conn-green-text',
+  watch: 'text-conn-amber-text',
+};
+
+function SignalList({
+  title,
+  items,
+  testId,
+  tone,
+}: {
+  title: string;
+  items: readonly string[];
+  testId: string;
+  tone: 'fit' | 'watch';
+}) {
   if (items.length === 0) return null;
   return (
     <section className="mt-4" data-testid={testId}>
-      <h4 className="text-xs font-semibold text-cafe-black">{title}</h4>
+      <h4 className="text-xs font-semibold text-cafe-black">
+        {title} <span className="font-normal text-cafe-muted">{items.length}</span>
+      </h4>
       <ul className="mt-1.5 space-y-1 text-xs leading-5 text-cafe-secondary">
         {items.map((item) => (
           <li key={item} className="flex gap-2">
-            <span aria-hidden="true" className="text-cafe-muted">
+            <span aria-hidden="true" className={SIGNAL_DOT_CLASS[tone]}>
               ·
             </span>
             <span>{item}</span>
@@ -47,6 +68,7 @@ export function TeamMemberDetail({
   onChanged: () => Promise<boolean>;
 }) {
   const { identity, capability, availability, candidate } = row;
+  const copy = useShellCopy(memberSaveCopy);
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -65,8 +87,8 @@ export function TeamMemberDetail({
       <section className="rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4">
         {capability.state === 'applied' ? (
           <>
-            <SignalList title="适合的任务" items={capability.fitSignals} testId="team-detail-fit" />
-            <SignalList title="协作时留意" items={capability.watchOuts} testId="team-detail-cautions" />
+            <SignalList title="适合的任务" items={capability.fitSignals} testId="team-detail-fit" tone="fit" />
+            <SignalList title="协作时留意" items={capability.watchOuts} testId="team-detail-cautions" tone="watch" />
             {capability.fitSignals.length === 0 && capability.watchOuts.length === 0 && (
               <p className="text-xs text-cafe-secondary">这一版画像里还没有可读的能力信号。</p>
             )}
@@ -97,6 +119,12 @@ export function TeamMemberDetail({
         <TeamEvidenceFold candidate={candidate} capability={capability} />
       </section>
 
+      <details className="rounded-xl border border-cafe-subtle p-4" data-testid="team-member-records">
+        <summary className="cursor-pointer text-xs font-semibold text-cafe-accent">{copy.records}</summary>
+        <MemberCopyProvider>
+          <MemberRoutingHistory cat={{ id: identity.catId }} model={model} />
+        </MemberCopyProvider>
+      </details>
       <RoutingSignalControls
         subjectRef={{ type: 'cat', catId: identity.catId }}
         affectedCatIds={[identity.catId]}

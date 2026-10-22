@@ -1,11 +1,17 @@
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { JSX, ReactNode } from 'react';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
+import { useArtifactWidgetBlock } from '@/hooks/useArtifactWidgetBlock';
 import { API_URL } from '@/utils/api-client';
 import { CompactLabel } from '../content-overflow/CompactLabel';
 import { MarkdownContent } from '../MarkdownContent';
+import { useShellCopy } from '../shell/shell-copy';
 import { CodeViewer } from '../workspace/CodeViewer';
+import { publishedTextCopy } from '../workspace/published-text.shell-copy';
+import { ArtifactWidgetFrame } from './ArtifactWidgetFrame';
+import { artifactDetailCopy } from './artifact-detail.shell-copy';
 import { artifactContentSource, classifyArtifactView, prRefToUrl, resolveAssetUrl } from './artifact-view';
+import { PublishedTextReader } from './PublishedTextReader';
 
 const S = {
   fill: 'none',
@@ -57,20 +63,21 @@ function PrBody({ artifact }: { artifact: ThreadArtifactDTO }): JSX.Element {
 }
 
 function DownloadBody({ artifact, url }: { artifact: ThreadArtifactDTO; url: string }): JSX.Element {
+  const t = useShellCopy(artifactDetailCopy);
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
       <CompactLabel
-        label="产物名称"
+        label={t.artifactName}
         value={artifact.name}
         className="w-full max-w-md text-sm font-medium text-cafe-secondary"
       />
-      <div className="text-xs text-cafe-muted">此类型无法在面板内预览</div>
+      <div className="text-xs text-cafe-muted">{t.previewUnavailable}</div>
       <div className="mt-1 flex gap-2">
         <a href={url} download className={actionBtnClass}>
-          下载 <IconDownload />
+          {t.download} <IconDownload />
         </a>
         <a href={url} target="_blank" rel="noreferrer" className={linkBtnClass}>
-          新标签打开 <IconExternal />
+          {t.openInNewTab} <IconExternal />
         </a>
       </div>
     </div>
@@ -105,23 +112,128 @@ function FallbackBody({
   );
 }
 
+/**
+ * widget view：按坐标从原消息读回 HTML 原块，用与聊天相同的消毒与 iframe 沙盒在面板内预览。
+ *
+ * 目录 DTO 不带正文；这里只接受服务端复核过 thread / message / block id / kind 的返回。
+ * 缺坐标、找不到块、无权限、读取失败都显示明确状态，并保留回原消息的出口——
+ * 不把别的 widget 拿来顶上。
+ */
+function WidgetBody({
+  artifact,
+  threadId,
+  onJump,
+}: {
+  artifact: ThreadArtifactDTO;
+  threadId: string | null;
+  onJump: (sourceMessageId: string) => void;
+}): JSX.Element {
+  const { state, reload } = useArtifactWidgetBlock(artifact, threadId);
+  const jump = artifact.sourceMessageId ? (
+    <button
+      type="button"
+      onClick={() => artifact.sourceMessageId && onJump(artifact.sourceMessageId)}
+      className={`mt-1 ${linkBtnClass}`}
+    >
+      回原消息 <IconExternal />
+    </button>
+  ) : null;
+
+  if (!artifact.sourceMessageId || !artifact.widgetBlockId)
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+        <div className="text-sm font-medium text-cafe-secondary">{artifact.name}</div>
+        <div className="text-xs text-cafe-muted">这件作品没有可预览的 HTML 坐标（旧数据或选择卡片）。</div>
+        {jump}
+      </div>
+    );
+  if (state.status === 'idle' || state.status === 'loading')
+    return <div className="px-4 py-8 text-center text-xs text-cafe-muted">正在读取 HTML…</div>;
+  if (state.status === 'unavailable')
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+        <div className="text-sm font-medium text-cafe-secondary">{artifact.name}</div>
+        <div className="text-xs text-cafe-muted">找不到这个 HTML 块，或你没有查看权限。</div>
+        {jump}
+      </div>
+    );
+  if (state.status === 'error')
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+        <div className="text-sm font-medium text-cafe-secondary">{artifact.name}</div>
+        <div className="text-xs text-cafe-error">读取 HTML 正文失败。</div>
+        <button type="button" onClick={reload} className={actionBtnClass}>
+          重试
+        </button>
+        {jump}
+      </div>
+    );
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-3" data-artifact-widget-body>
+      <ArtifactWidgetFrame block={state.block} />
+    </div>
+  );
+}
+
 /** text view：复用 workspace 底层渲染器（MarkdownContent / CodeViewer）在 panel 内看正文。 */
 function ArtifactTextBody({
   artifact,
   worktreeId,
   onJump,
+  onBack,
+  sourceThreadId,
+  reviewAction,
 }: {
   artifact: ThreadArtifactDTO;
   worktreeId: string | null;
   onJump: (sourceMessageId: string) => void;
+  onBack?: () => void;
+  sourceThreadId?: string;
+  reviewAction?: ReactNode;
 }): JSX.Element {
   const { content, path, isMarkdown, loading, error } = useArtifactContent(artifact, worktreeId, true);
+  const t = useShellCopy(publishedTextCopy);
   if (loading) {
-    return <div className="px-4 py-8 text-center text-xs text-cafe-muted">正文加载中…</div>;
+    return (
+      <>
+        {onBack && (
+          <button type="button" onClick={onBack} className="shrink-0 px-3 py-2 text-left text-xs text-cafe-crosspost">
+            {t.back}
+          </button>
+        )}
+        <div className="px-4 py-8 text-center text-xs text-cafe-muted">{t.loading}</div>
+      </>
+    );
   }
   if (error || content === null) {
-    return <FallbackBody artifact={artifact} onJump={onJump} />;
+    return (
+      <>
+        {onBack && (
+          <button type="button" onClick={onBack} className="shrink-0 px-3 py-2 text-left text-xs text-cafe-crosspost">
+            {t.back}
+          </button>
+        )}
+        <FallbackBody artifact={artifact} onJump={onJump} />
+      </>
+    );
   }
+  if (artifact.url && onBack)
+    return (
+      <PublishedTextReader
+        key={JSON.stringify([
+          sourceThreadId,
+          artifact.sourceMessageId,
+          artifact.publicationItem,
+          artifact.url,
+          artifact.createdAt,
+        ])}
+        artifact={artifact}
+        content={content}
+        sourceThreadId={sourceThreadId}
+        onBack={onBack}
+        reviewAction={reviewAction}
+      />
+    );
   if (isMarkdown) {
     // workspace-backed（repo 文件）markdown：传 basePath（path 所在目录）+ worktreeId，让 MarkdownContent
     // 解析相对链接/图片（与 FileContentRenderer 一致）；uploads/外链 markdown 无 workspace 上下文，不传
@@ -156,29 +268,46 @@ export function ArtifactDetailView({
   onBack,
   onJump,
   reviewAction,
+  sourceThreadId,
 }: {
   artifact: ThreadArtifactDTO;
   worktreeId: string | null;
   onBack: () => void;
   onJump: (sourceMessageId: string) => void;
   reviewAction?: ReactNode;
+  sourceThreadId?: string;
 }): JSX.Element {
   const view = classifyArtifactView(artifact);
   const url = resolveAssetUrl(artifact.url, API_URL);
+  const t = useShellCopy(artifactDetailCopy);
+
+  if (view === 'text' && artifact.url)
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <ArtifactTextBody
+          artifact={artifact}
+          worktreeId={worktreeId}
+          onJump={onJump}
+          onBack={onBack}
+          sourceThreadId={sourceThreadId}
+          reviewAction={reviewAction}
+        />
+      </div>
+    );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-cafe px-3 py-2.5">
         <button
           type="button"
-          aria-label="返回"
+          aria-label={t.back}
           onClick={onBack}
           className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-cafe-crosspost transition-colors hover:text-cafe-accent"
         >
           <IconBack />
         </button>
         <CompactLabel
-          label="产物名称"
+          label={t.artifactName}
           value={artifact.name}
           className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
         />
@@ -207,6 +336,7 @@ export function ArtifactDetailView({
           </div>
         )}
         {view === 'pr' && <PrBody artifact={artifact} />}
+        {view === 'widget' && <WidgetBody artifact={artifact} threadId={sourceThreadId ?? null} onJump={onJump} />}
         {view === 'text' && <ArtifactTextBody artifact={artifact} worktreeId={worktreeId} onJump={onJump} />}
         {/* P1-1（砚砚）+ P2-1（云端）：uploads binary 有 url → 下载/打开；repo binary（只有 ref 无 url）
             → fallback 不空白。不走 workspace raw download——该 route 只 stream image/audio/video，

@@ -49,8 +49,6 @@ export {
   handleAckMentions,
   handleAdmitEntrustedWork,
   handleCloseEntrustedWork,
-  handleCompleteA2ADispatch,
-  handleCompleteManagedHold,
   handleCrossPostMessage,
   handleDrillMemoryCue,
   handleFeatIndex,
@@ -63,7 +61,6 @@ export {
   handleOfferCustody,
   handlePostMessage,
   handleRecordMemoryCueOutcome,
-  handleRegisterPrTracking,
   handleRetryCustodyAdmission,
   handleUpdateEntrustedWork,
   handleUpdateTask,
@@ -71,7 +68,6 @@ export {
   listThreadsInputSchema,
   offerCustodyInputSchema,
   postMessageInputSchema,
-  registerPrTrackingInputSchema,
   retryCustodyAdmissionInputSchema,
   updateEntrustedWorkInputSchema,
   updateTaskInputSchema,
@@ -107,12 +103,6 @@ export {
   startEvolutionProgramInputSchema,
   updateEvolutionProgramInputSchema,
 } from './capability-evolution-tools.js';
-export { collectiveParticipationTools } from './collective-participation-tools.js';
-export {
-  communityRouteAcceptanceInputSchema,
-  communityRouteAcceptanceTools,
-  handleCommunityRouteAcceptance,
-} from './community-route-acceptance-tool.js';
 export {
   contentEditorTools,
   editOfficeDocumentInputSchema,
@@ -120,6 +110,13 @@ export {
   handleInspectOfficeDocument,
   inspectOfficeDocumentInputSchema,
 } from './content-editor-tools.js';
+export { contentModificationTools } from './content-modification-tools.js';
+export {
+  developmentReturnInputSchema,
+  developmentReturnTools,
+  handleDevelopmentReturn,
+} from './development-return-tools.js';
+export { developmentWorkInputSchema, developmentWorkTools, handleDevelopmentWork } from './development-work-tools.js';
 export {
   distillationTools,
   handleMarkGeneralizable,
@@ -156,11 +153,6 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
-  externalReviewVerdictInputSchema,
-  externalReviewVerdictTools,
-  handleExternalReviewVerdict,
-} from './external-review-verdict-tool.js';
-export {
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
   externalRuntimeSessionTools,
@@ -183,16 +175,18 @@ export {
   handleFinanceQuery,
 } from './finance-tools.js';
 export {
-  gameActionTools,
-  handleSubmitGameAction,
-  submitGameActionInputSchema,
-} from './game-action-tools.js';
-export {
   graphResolveInputSchema,
   graphTools,
   handleGraphResolve,
 } from './graph-tools.js';
-export { handleHomeStateSelf, homeStateSelfInputSchema, homeStateTools } from './home-state-tools.js';
+export { handleGetHarnessHistory, handlePublishHarnessHistory, harnessHistoryTools } from './harness-history-tools.js';
+export {
+  capabilitiesSnapshotInputSchema,
+  handleCapabilitiesSnapshot,
+  handleHomeStateSelf,
+  homeStateSelfInputSchema,
+  homeStateTools,
+} from './home-state-tools.js';
 export {
   handlePreviewOpen,
   handleWorkspaceNavigate,
@@ -224,11 +218,6 @@ export {
   limbListToolsInputSchema,
   limbTools,
 } from './limb-tools.js';
-export {
-  handleReadMeetingArtifact,
-  meetingArtifactTools,
-  readMeetingArtifactInputSchema,
-} from './meeting-artifact-tools.js';
 export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,
@@ -283,6 +272,7 @@ export {
   realtimeCompanionStopInputSchema,
   realtimeCompanionTools,
 } from './realtime-companion-tools.js';
+export { recallMetricsTools } from './recall-metrics-tool.js';
 export {
   handleListRecent,
   listRecentInputSchema,
@@ -364,3 +354,4 @@ export {
   recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';
+export { workTools } from './work-tools.js';

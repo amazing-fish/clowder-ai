@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { coCreatorDisplay } from '@cat-cafe/shared';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
-import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { refreshCoCreatorMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
+/* The placeholder the hook starts with, and falls back to when the config cannot be loaded. It carries no colour on
+ * purpose: a colour here would be painted for a moment as if it were the user's and then corrected (F322 human message).
+ * Every consumer that needs a colour already has its own fallback for a config without one. */
 const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   name: 'ME',
   aliases: [],
   mentionPatterns: ['@co-creator'],
-  color: { ...CO_CREATOR_COLOR },
 };
 
 let cachedCoCreator: CoCreatorConfig | null = null;
@@ -21,6 +23,12 @@ function publishCoCreator(next: CoCreatorConfig): void {
   cachedCoCreator = next;
   refreshCoCreatorMentionData(next.mentionPatterns);
   for (const listener of listeners) listener(next);
+}
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 async function fetchCoCreator(): Promise<CoCreatorConfig> {
@@ -33,16 +41,14 @@ async function fetchCoCreator(): Promise<CoCreatorConfig> {
 }
 
 export function useCoCreatorConfig(): CoCreatorConfig {
-  const [coCreator, setCoCreator] = useState<CoCreatorConfig>(() => cachedCoCreator ?? DEFAULT_CO_CREATOR);
+  const coCreator = useSyncExternalStore(
+    subscribe,
+    () => cachedCoCreator ?? DEFAULT_CO_CREATOR,
+    () => DEFAULT_CO_CREATOR,
+  );
 
   useEffect(() => {
-    listeners.add(setCoCreator);
-    if (cachedCoCreator) {
-      setCoCreator(cachedCoCreator);
-      return () => {
-        listeners.delete(setCoCreator);
-      };
-    }
+    if (cachedCoCreator) return;
     if (!fetchCoCreatorPromise) {
       fetchCoCreatorPromise = fetchCoCreator()
         .then((next) => {
@@ -55,19 +61,13 @@ export function useCoCreatorConfig(): CoCreatorConfig {
         });
     }
     let cancelled = false;
-    fetchCoCreatorPromise
-      .then((next) => {
-        if (!cancelled) setCoCreator(next);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          refreshCoCreatorMentionData(DEFAULT_CO_CREATOR.mentionPatterns);
-          setCoCreator(DEFAULT_CO_CREATOR);
-        }
-      });
+    fetchCoCreatorPromise.catch(() => {
+      if (!cancelled) {
+        refreshCoCreatorMentionData(DEFAULT_CO_CREATOR.mentionPatterns);
+      }
+    });
     return () => {
       cancelled = true;
-      listeners.delete(setCoCreator);
     };
   }, []);
 
@@ -84,4 +84,8 @@ export function resetCoCreatorConfigCacheForTest(): void {
 export function primeCoCreatorConfigCache(cc: CoCreatorConfig): void {
   publishCoCreator(cc);
   fetchCoCreatorPromise = Promise.resolve(cc);
+}
+
+export function useCoCreatorDisplay() {
+  return coCreatorDisplay(useCoCreatorConfig());
 }

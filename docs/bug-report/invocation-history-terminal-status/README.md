@@ -1,3 +1,10 @@
+---
+doc_kind: note
+topics: [invocation-history, terminal-status]
+created: 2026-09-30
+updated: 2026-10-22
+---
+
 # Invocation history after startup recovery
 
 Upstream issue: [#1556](https://github.com/zts212653/clowder-ai/issues/1556).
@@ -12,29 +19,29 @@ The existing response status vocabulary is preserved: succeeded becomes `done`, 
 
 Architecture cell: canonical invocation identity and trajectory reads.
 
-Map delta: extend the existing canonical trajectory resolver with a shared terminal-summary reconciliation function, consumed by the list and detail routes.
+Map delta: extend the existing canonical trajectory resolver with a shared terminal-summary reconciliation function, consumed by the current list and detail reader in `session-transcript.ts`. The list route passes the authenticated requesting user to that reader. Scoped sessions retain their existing `resolveScopedSessionTrajectory` policy, including running-until-settled and interrupted-as-cancelled semantics.
 
 Why: lifecycle authority belongs to the durable execution ledger; keeping the reconciliation in one resolver prevents the two endpoints from disagreeing.
 
 Canonical source: `packages/api/src/domains/cats/services/session/CanonicalInvocationTrajectoryResolver.ts#resolveCanonicalInvocationSummaries` and `ITurnExecutionStore#get`.
 
-Consumer evidence: `rg -n resolveCanonicalInvocationSummaries packages/api/src` finds the shared definition and its two route consumers, `invocation-trajectory-routes.ts` and `session-transcript.ts`.
+Consumer evidence: `rg -n resolveCanonicalInvocationSummaries packages/api/src` finds the shared definition and its `session-transcript.ts` consumer. Both history list and invocation detail call the same adapter; paginated Raw reads keep their existing response contract.
 
 Claim guard: ledger lifecycle data is used only when invocation, user, thread and cat identities match. The mismatch regression would expose a private terminal reason if any identity fence were removed. Existing thread/session authorization executes before reconciliation. The list reconciles only its filtered, paginated rows, bounding ledger reads to the response limit.
 
 ## Validation
 
-Five terminal-state regression cases failed on the unmodified upstream build before the resolver change. They now pass alongside the identity and pagination checks.
+During maintainer integration against the current public main, all five original terminal-state regressions failed with the main readers unchanged. Three sealed-session regressions and two conditional cross-session terminal regressions also failed. Missing/running/foreign-ledger controls and the scoped consumer characterization passed on that baseline. The integrated resolver repairs these lifecycle assertions without changing archived events.
 
 ```text
 pnpm exec tsc -p packages/api/tsconfig.json
 node --test packages/api/test/f299-invocation-trajectory.test.js packages/api/test/f299-canonical-request-generation-resolver.test.js packages/api/test/session-transcript-validation.test.js packages/api/test/thread-access-policy.test.js
 ```
 
-The four test files passed 43 tests, with no failures or skips. Tests use isolated in-memory stores and cover startup interruption without a transcript terminal, success, failure, timeout, cancellation, conflicting transcript evidence, identity mismatches, legacy records, pagination, and existing access boundaries. Changed JavaScript/TypeScript files passed Biome checks.
+The four test files passed 55 tests, with no failures or skips. The existing three scoped-status checks also passed separately with `node --import tsx --test packages/api/test/f290-communication-scoped-status.test.ts`. Tests use isolated in-memory stores and cover startup interruption without a transcript terminal, success, failure, timeout, cancellation, conflicting transcript evidence, identity mismatches, legacy records, pagination, and existing access boundaries. The additional regressions cover the #1580 threshold (132/390 events) and budget_exhausted (51 events) archive shapes, unchanged usage and archive bytes, and two retained audit segments for one invocation. The report did not provide D's durable child terminal: failed/succeeded variants are explicit assumptions, with missing/running/foreign controls and a succeeded parent that cannot establish child success. Scoped behavior is exercised through both actual routes. Changed JavaScript/TypeScript files passed Biome checks; pre-existing complexity warnings remain in the existing route/test files.
 
 ![Existing history component with transcript-only and reconciled summaries](component-terminal-status.png)
 
-The screenshot is a headless, isolated rendering of the existing `InvocationTrajectoryList` component using fixture summaries produced by the actual projector and resolver. The recovered case displays a terminal error instead of running, with the recovered duration. A DOM assertion verified this result. It does not constitute acceptance against a running Hub instance or production data.
+The original contributor screenshot is a headless, isolated rendering of the existing `InvocationTrajectoryList` component using fixture summaries produced by the actual projector and resolver. The recovered case displays a terminal error instead of running, with the recovered duration. A DOM assertion verified this result. It does not constitute acceptance against a running Hub instance or production data.
 
 Runtime activation and post-restart history acceptance remain separate from these candidate-branch checks. No API process was restarted for this validation.

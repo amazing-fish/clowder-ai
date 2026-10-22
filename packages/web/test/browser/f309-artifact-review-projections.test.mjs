@@ -7,6 +7,8 @@ import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 import { openReviewPanel } from './fixtures/f309-artwork-controls.mjs';
+import './f309-publication-display.journey.mjs';
+import './f326-work-response.journey.mjs';
 
 async function setup(t, name, kind = 'png') {
   const root = await mkdtemp(path.join(tmpdir(), `f309-passive-${name}-`));
@@ -17,6 +19,8 @@ async function setup(t, name, kind = 'png') {
   const browser = await chromium.launch({ headless: true });
   const pages = [];
   const errors = [];
+  const authorityReads = [];
+  const browserEvents = [];
   t.after(async () => {
     for (const [index, page] of pages.entries()) {
       await page.screenshot({ path: path.join(evidence, `${name}-${index}.png`) });
@@ -24,7 +28,11 @@ async function setup(t, name, kind = 'png') {
     }
     await writeFile(
       path.join(evidence, `${name}-result.json`),
-      JSON.stringify({ errors, task: host.tasks.get(host.taskId), review: host.store.get(reviewId) }, null, 2),
+      JSON.stringify(
+        { errors, authorityReads, browserEvents, task: host.tasks.get(host.taskId), review: host.store.get(reviewId) },
+        null,
+        2,
+      ),
     );
     await browser.close();
     await host.close();
@@ -44,6 +52,31 @@ async function setup(t, name, kind = 'png') {
     const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
     const page = await context.newPage();
     pages.push(page);
+    page.on('response', async (response) => {
+      if (new URL(response.url()).pathname === `/api/artifact-reviews/${reviewId}`) {
+        authorityReads.push({
+          page: pages.indexOf(page),
+          at: Date.now(),
+          status: response.status(),
+          body: await response.json().catch(() => null),
+        });
+      }
+    });
+    await page.exposeFunction('recordReviewDiagnostic', (event) =>
+      browserEvents.push({ page: pages.indexOf(page), ...event }),
+    );
+    await page.addInitScript(() => {
+      for (const type of ['cat-cafe:entrusted-work-projection-invalidated', 'cat-cafe:artifact-review-changed']) {
+        window.addEventListener(type, (event) =>
+          window.recordReviewDiagnostic({
+            type,
+            detail: event.detail,
+            at: Date.now(),
+            visibility: document.visibilityState,
+          }),
+        );
+      }
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     page.setDefaultTimeout(8000);
     await page.goto(`${host.origin}?mode=${mode}`);
@@ -85,7 +118,7 @@ test(
       },
     });
     await schedule.getByTestId('product-schedule-item').waitFor({ state: 'hidden' });
-    await history.getByText('原任务已收口，审阅记录与历史版本继续保留。', { exact: true }).waitFor();
+    await history.getByText('原任务已收口，讨论与历史版本继续保留。', { exact: true }).waitFor();
     await history.getByTestId('review-media-stage').waitFor();
     assert.equal((await host.reviews.read(reviewId, host.human)).review.rounds.length, 1);
     assert.deepEqual(errors, []);
@@ -194,20 +227,33 @@ for (const kind of ['png', 'mp4']) {
       const page = await open('product-schedule');
       await page.getByTestId('f307-add-surface').click();
       await page.getByTestId('workspace-launcher-artifacts').click();
+      // PNG/MP4 rows no longer carry a raw upload link; the panel renders the owner list in order.
+      const listed = await (await fetch(`${host.apiOrigin}/api/threads/${host.thread.id}/artifacts`)).json();
+      const original = listed.artifacts.findIndex((item) => item.url === `/uploads/review-input.${kind}`);
+      assert.ok(original >= 0);
+      await page.locator('[data-artifact-row]').nth(original).click();
+      // F309 AC-U3: a generic entry continues the Task review by name instead of entering it silently.
       await page
-        .locator('[data-artifact-row]')
-        .filter({ has: page.locator(`a[href$="/uploads/review-input.${kind}"]`) })
+        .getByRole('button', { name: new RegExp(`^继续.+的审阅：${view.review.title} .* 第 1 版 · 已收口$`) })
         .click();
-      await page.getByTestId('open-artifact-review').click();
-      await page.getByText('原任务已收口，审阅记录与历史版本继续保留。', { exact: true }).waitFor();
+      await page.getByText('原任务已收口，讨论与历史版本继续保留。', { exact: true }).waitFor();
+      // The original publication's context lands on its own round 1; the cat's response lives on round 2.
+      await page.getByRole('combobox', { name: '审阅版本' }).selectOption('2');
       await openReviewPanel(page, 'details');
       await page.getByText('新版已响应原始意见。', { exact: true }).waitFor();
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');
       await openReviewPanel(page, 'comments');
       await page.getByText(retainedComment, { exact: true }).waitFor();
-      assert.equal(await page.getByRole('textbox', { name: '新增标注意见', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('textbox', { name: '评论内容', exact: true }).count(), 0);
+      // The composer only exists in comment mode, so also prove the closed history offers no way into it.
+      assert.equal(
+        await page
+          .getByRole('button', { name: kind === 'png' ? '圈选' : '评论', exact: true, disabled: false })
+          .count(),
+        0,
+      );
       await page.reload();
-      await page.getByText('原任务已收口，审阅记录与历史版本继续保留。', { exact: true }).waitFor();
+      await page.getByText('原任务已收口，讨论与历史版本继续保留。', { exact: true }).waitFor();
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');
       await openReviewPanel(page, 'comments');
       await page.getByText(retainedComment, { exact: true }).waitFor();
@@ -228,23 +274,38 @@ test(
     const { host, reviewId, open, errors } = await setup(t, 'retirement-events');
     const schedule = await open('product-schedule');
     const needs = await open('needs-me');
-    await schedule.getByTestId('product-schedule-item').waitFor();
+    const work = schedule.getByTestId('product-schedule-item');
+    await work.waitFor();
+    await work.getByText('等你判断', { exact: true }).waitFor();
+    await work.getByTestId('product-schedule-open-artifact').waitFor();
     await needs.getByTestId('needs-me-item').waitFor();
-    let reads = 0;
+    const taskBefore = host.tasks.get(host.taskId);
+    assert.equal(taskBefore.status, 'todo');
+    const reads = new Map([
+      [schedule, 0],
+      [needs, 0],
+    ]);
     for (const page of [schedule, needs])
       page.on('request', (request) => {
-        if (request.url().includes('/api/entrusted-work/')) reads += 1;
+        if (request.url().includes('/api/entrusted-work/')) reads.set(page, reads.get(page) + 1);
       });
     const before = host.store.get(reviewId);
     await host.messages.softDelete(host.publication.id, 'operator'); // Withdraw the source without a review-route/browser mutation.
     host.emitToUser('another-owner', 'entrusted_work_projection_invalidated', { ownerUserId: 'another-owner' });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(reads, 0, 'foreign owner events must not enter the subscribed user room');
+    assert.deepEqual([...reads.values()], [0, 0], 'foreign owner events must not enter the subscribed user room');
     assert.equal(await needs.getByTestId('needs-me-item').count(), 1);
     await host.recoverySpec.run.execute({});
     await needs.getByTestId('needs-me-item').waitFor({ state: 'hidden' });
-    await schedule.getByText('安静进行中', { exact: true }).waitFor();
-    assert.ok(reads >= 2, 'both already-mounted owner projections must refetch from the producer event');
+    await work.getByText('等你判断', { exact: true }).waitFor({ state: 'hidden' });
+    await work.getByText('未开始', { exact: true }).waitFor();
+    await work.getByTestId('product-schedule-open-artifact').waitFor({ state: 'hidden' });
+    assert.equal(await work.getByTestId('open-artifact-review').count(), 0);
+    assert.equal(await work.getAttribute('data-subject-ref'), `task:work:${host.taskId}`);
+    assert.equal(await work.getAttribute('data-owner-revision'), String(taskBefore.entrustedWork.revision));
+    assert.deepEqual(host.tasks.get(host.taskId), taskBefore, 'retiring attention must not advance or close the Task');
+    assert.ok(reads.get(schedule) >= 1, 'the mounted Schedule must refetch from the producer event');
+    assert.ok(reads.get(needs) >= 1, 'the mounted Needs Me must refetch from the producer event');
     assert.equal(host.store.get(reviewId).revision, before.revision + 1);
     assert.equal(host.store.get(reviewId).rounds.at(-1).attentionRetiredReason, 'access_revoked');
     assert.deepEqual(errors, []);

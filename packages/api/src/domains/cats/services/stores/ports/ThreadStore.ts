@@ -15,11 +15,26 @@ import type {
   ThreadPhase,
 } from '@cat-cafe/shared';
 import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from './OwnedThreadSeed.js';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
+
+/** Stable, user-scoped identity for a first-run thread retry. */
+export function onboardingThreadId(userId: string, journeyId: string): string {
+  // Preserve every code point in a reversible, key-safe representation. The
+  // previous cleanup + truncation mapped `user.a`/`usera` and long journeys to
+  // the same Redis key, which could return another user's thread on retry.
+  const encode = (value: string) => Buffer.from(value, 'utf8').toString('base64url') || 'unknown';
+  return `onboarding-${encode(userId)}-${encode(journeyId)}`;
+}
+
+export interface EnsureOnboardingThreadResult {
+  thread: Thread;
+  created: boolean;
+}
 
 /** Canonical first-message title derivation shared by append, recovery, and true recall. */
 export function deriveAutoThreadTitle(content: string): string | null {
@@ -29,7 +44,7 @@ export function deriveAutoThreadTitle(content: string): string | null {
 }
 
 /** System-owned thread surfaces that stay distinct from ordinary user conversations. */
-export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops';
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops' | 'collective_channel';
 
 /**
  * F032 Phase C: Participant activity data for reviewer matching.
@@ -201,6 +216,10 @@ export interface Thread {
   id: string;
   projectPath: string;
   title: string | null;
+  titleSource?: 'user' | 'temporary' | 'cat';
+  titleCatId?: string;
+  /** Successful import coordinate; the chain record remains the origin authority. */
+  sessionImport?: { sessionId: string; catId: string };
   createdBy: string;
   participants: CatId[];
   lastActiveAt: number;
@@ -267,6 +286,8 @@ export interface Thread {
   systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F202 C1: Carrier-neutral plugin ownership for threads created on behalf of one plugin instance. */
+  pluginOwnership?: ThreadPluginOwnershipV1;
   /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
   externalRuntimeAnchorState?: ExternalRuntimeAnchorStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
@@ -286,7 +307,7 @@ export interface Thread {
   /** #872: Thread metadata anchor for session recovery (worktrees, PRs, issues, features, notes). */
   threadMetadata?: ThreadMetadataV1;
   /** F229 / F167: Thread kind marker.
-   *  'concierge' = 专属前台猫载体（per-user，sidebar 默认隐藏，F229）
+   *  'concierge' = 专属前台猫载体（per-user，canonical 载体在 sidebar 可发现，F317）
    *  'gate-keeping' = 守门 thread (per-repo inbox / community ops 看板载体，F167 trigger-time guard)
    *  undefined/absence = 普通 thread。 */
   threadKind?: ThreadKind;
@@ -326,6 +347,11 @@ export interface PendingContinuationEntry {
   createdAt: number;
 }
 
+/** Initial mutable preferences included in the first durable thread write. */
+export interface ThreadCreateOptions {
+  pinned?: boolean;
+}
+
 /**
  * F128: Audit metadata written to a thread when it is created from an approved proposal.
  */
@@ -359,6 +385,24 @@ export interface ConnectorHubStateV1 {
   lastCommandAt?: number;
 }
 
+/** F202 C1: Durable, provider-neutral ownership of one thread by one installed plugin instance. */
+export interface ThreadPluginOwnershipV1 {
+  v: 1;
+  pluginInstanceId: string;
+}
+
+export function isThreadPluginOwnershipV1(value: unknown): value is ThreadPluginOwnershipV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 2 &&
+    candidate.v === 1 &&
+    typeof candidate.pluginInstanceId === 'string' &&
+    candidate.pluginInstanceId.length > 0 &&
+    candidate.pluginInstanceId.trim() === candidate.pluginInstanceId
+  );
+}
+
 /** F087: Bootcamp phase for operator onboarding (F171 v2 flow) */
 export type BootcampPhase =
   | 'phase-1-intro'
@@ -387,6 +431,7 @@ export interface BootcampStateV1 {
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
 }
 
@@ -694,6 +739,7 @@ export interface ILabelStore {
  * Common interface for thread stores (in-memory and future Redis).
  */
 export interface IThreadStore {
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread | Promise<Thread>;
   create(
     userId: string,
     title?: string,
@@ -701,10 +747,19 @@ export interface IThreadStore {
     parentThreadId?: string,
     proposalAudit?: ThreadProposalAudit,
     branchAudit?: ThreadBranchAudit,
+    options?: ThreadCreateOptions,
   ): Thread | Promise<Thread>;
   get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
   list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
+  /** Read only candidate threads admitted by the durable user visibility index. */
+  listCandidates?(userId: string, threadIds: readonly string[]): Thread[] | Promise<Thread[]>;
+  listProjectCandidates?(
+    userId: string,
+    projectPath: string,
+    threadIds: readonly string[],
+  ): Thread[] | Promise<Thread[]>;
+  hasByProject?(userId: string, projectPath: string): boolean | Promise<boolean>;
   addParticipants(threadId: string, catIds: CatId[]): void | Promise<void>;
   getParticipants(threadId: string): CatId[] | Promise<CatId[]>;
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
@@ -722,6 +777,13 @@ export interface IThreadStore {
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
   updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
+  setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): void | Promise<void>;
+  setAutomaticTitle(
+    threadId: string,
+    title: string,
+    source: 'temporary' | 'cat',
+    catId?: string,
+  ): boolean | Promise<boolean>;
   /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
   compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
   /** ISSUE-16: backfill projectPath for threads created before the fix */
@@ -739,6 +801,8 @@ export interface IThreadStore {
   ): boolean | Promise<boolean>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
+  /** Post-create Feature association. `null` clears the thread's association. */
+  updateBacklogItem(threadId: string, backlogItemId: string | null): void | Promise<void>;
   /**
    * F046 D3: Persist one-shot feedback for suppressed A2A mentions.
    * The next invocation of this cat in this thread should consume and clear it.
@@ -775,8 +839,12 @@ export interface IThreadStore {
   updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
   /** F192 livefix: Set/clear system thread kind for sidebar "系统" section visibility. */
   updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void | Promise<void>;
+  /** Atomically claim an unclassified owner thread; never overwrite another system kind. */
+  claimSystemKind(threadId: string, ownerUserId: string, kind: ThreadSystemKind): boolean | Promise<boolean>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
+  /** F202 C1: Set or clear the plugin instance that owns this thread. */
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void | Promise<void>;
   updatePreferredWorkspaceMode(
     threadId: string,
     mode:
@@ -885,6 +953,14 @@ export interface IThreadStore {
    * Returns the thread (existing or newly created).
    */
   ensureThread(threadId: string, title: string): Thread | Promise<Thread>;
+  /** First-run onboarding creation with a store-level journey idempotency key. */
+  ensureOnboardingThread?(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState?: BootcampStateV1,
+  ): EnsureOnboardingThreadResult | Promise<EnsureOnboardingThreadResult>;
   ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread | Promise<Thread>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
@@ -903,7 +979,7 @@ export interface IThreadStore {
    */
   indexForUser(threadId: string, userId: string): void | Promise<void>;
   /** F229 / F167: Set or clear threadKind marker.
-   *  'concierge' = 专属前台猫载体（sidebar 默认隐藏）。
+   *  'concierge' = 专属前台猫载体（canonical 载体在 sidebar 可发现）。
    *  'gate-keeping' = 守门 thread (per-repo inbox / community ops)，F167 guard 用此标记 default-block 三端点。
    *  null 清除。 */
   updateThreadKind(threadId: string, kind: ThreadKind | null): void | Promise<void>;
@@ -918,6 +994,7 @@ const MAX_THREADS = 100;
  */
 export class ThreadStore implements IThreadStore {
   private threads: Map<string, Thread> = new Map();
+  private ownedThreadTombstones = new Set<string>();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
   private participantActivity: Map<
     string,
@@ -949,6 +1026,7 @@ export class ThreadStore implements IThreadStore {
     parentThreadId?: string,
     proposalAudit?: ThreadProposalAudit,
     branchAudit?: ThreadBranchAudit,
+    options?: ThreadCreateOptions,
   ): Thread {
     this.evictIfNeeded();
 
@@ -956,10 +1034,12 @@ export class ThreadStore implements IThreadStore {
       id: generateThreadId(),
       projectPath: projectPath ?? 'default',
       title: title ?? null,
+      titleSource: title ? 'user' : 'temporary',
       createdBy: userId,
       participants: [],
       lastActiveAt: Date.now(),
       createdAt: Date.now(),
+      ...(options?.pinned ? { pinned: true, pinnedAt: Date.now() } : {}),
       ...(parentThreadId ? { parentThreadId } : {}),
       ...(proposalAudit
         ? {
@@ -977,6 +1057,16 @@ export class ThreadStore implements IThreadStore {
 
     this.threads.set(thread.id, thread);
     return thread;
+  }
+
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread {
+    const candidate = ownedThreadFromSeed(seed);
+    if (this.ownedThreadTombstones.has(candidate.id)) return requireOwnedThread(null, seed.userId);
+    const existing = this.threads.get(candidate.id);
+    if (existing) return requireOwnedThread(existing, seed.userId);
+    this.evictIfNeeded();
+    this.threads.set(candidate.id, candidate);
+    return candidate;
   }
 
   ensureThread(threadId: string, title: string): Thread {
@@ -997,6 +1087,32 @@ export class ThreadStore implements IThreadStore {
     };
     this.threads.set(threadId, thread);
     return thread;
+  }
+
+  ensureOnboardingThread(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState?: BootcampStateV1,
+  ): EnsureOnboardingThreadResult {
+    const threadId = onboardingThreadId(userId, journeyId);
+    const existing = this.threads.get(threadId);
+    if (existing) return { thread: existing, created: false };
+    this.evictIfNeeded();
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath,
+      title,
+      createdBy: userId,
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      bootcampState,
+    };
+    this.threads.set(threadId, thread);
+    return { thread, created: true };
   }
 
   ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread {
@@ -1062,6 +1178,11 @@ export class ThreadStore implements IThreadStore {
     // Sort by lastActiveAt descending (most recent first)
     result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     return result;
+  }
+
+  listCandidates(userId: string, threadIds: readonly string[]): Thread[] {
+    const candidates = new Set(threadIds);
+    return this.list(userId).filter((thread) => candidates.has(thread.id));
   }
 
   listByProject(userId: string, projectPath: string): Thread[] {
@@ -1135,7 +1256,27 @@ export class ThreadStore implements IThreadStore {
 
   updateTitle(threadId: string, title: string): void {
     const thread = this.get(threadId);
-    if (thread) thread.title = title;
+    if (thread) {
+      thread.title = title;
+      thread.titleSource = 'user';
+      delete thread.titleCatId;
+    }
+  }
+
+  setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): void {
+    const thread = this.get(threadId);
+    if (thread) thread.sessionImport = value;
+  }
+
+  setAutomaticTitle(threadId: string, title: string, source: 'temporary' | 'cat', catId?: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || thread.deletedAt || (thread.titleSource ?? (thread.title ? 'user' : 'temporary')) !== 'temporary')
+      return false;
+    if (source === 'temporary' && thread.title !== null) return false;
+    thread.title = title;
+    thread.titleSource = source;
+    if (source === 'cat' && catId) thread.titleCatId = catId;
+    return true;
   }
 
   compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean {
@@ -1210,8 +1351,14 @@ export class ThreadStore implements IThreadStore {
   }
 
   linkBacklogItem(threadId: string, backlogItemId: string): void {
+    this.updateBacklogItem(threadId, backlogItemId);
+  }
+
+  updateBacklogItem(threadId: string, backlogItemId: string | null): void {
     const thread = this.get(threadId);
-    if (thread) thread.backlogItemId = backlogItemId;
+    if (!thread) return;
+    if (backlogItemId) thread.backlogItemId = backlogItemId;
+    else delete thread.backlogItemId;
   }
 
   setMentionRoutingFeedback(threadId: string, catId: CatId, feedback: ThreadMentionRoutingFeedback): void {
@@ -1331,6 +1478,19 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  claimSystemKind(threadId: string, ownerUserId: string, kind: ThreadSystemKind): boolean {
+    const thread = this.get(threadId);
+    if (
+      !thread ||
+      thread.deletedAt ||
+      thread.createdBy !== ownerUserId ||
+      (thread.systemKind !== undefined && thread.systemKind !== kind)
+    )
+      return false;
+    thread.systemKind = kind;
+    return true;
+  }
+
   /** F229 / F167: Set or clear threadKind marker for concierge / gate-keeping thread. */
   updateThreadKind(threadId: string, kind: ThreadKind | null): void {
     const thread = this.get(threadId);
@@ -1349,6 +1509,19 @@ export class ThreadStore implements IThreadStore {
       delete thread.connectorHubState;
     } else {
       thread.connectorHubState = state;
+    }
+  }
+
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void {
+    if (ownership !== null && !isThreadPluginOwnershipV1(ownership)) {
+      throw new TypeError('invalid plugin thread ownership');
+    }
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (ownership === null) {
+      delete thread.pluginOwnership;
+    } else {
+      thread.pluginOwnership = ownership;
     }
   }
 
@@ -1544,6 +1717,7 @@ export class ThreadStore implements IThreadStore {
   }
 
   delete(threadId: string): boolean {
+    if (threadId.startsWith('thread_owned_') && this.threads.has(threadId)) this.ownedThreadTombstones.add(threadId);
     if (threadId === DEFAULT_THREAD_ID) return false; // Cannot delete default
     // Cloud Codex R3 P2 fix: Clean up activity entries to prevent memory leak
     this.clearActivityForThread(threadId);
